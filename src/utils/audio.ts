@@ -491,11 +491,11 @@ class SoundEngine {
     // Danger level determines frequency of distant horrific screams
     let delayMs: number;
     if (this.currentDangerLevel >= 4) {
-      delayMs = immediate ? 1500 : 7000 + Math.random() * 8000; // 7-15s
+      delayMs = immediate ? 3000 : 14000 + Math.random() * 14000; // 14-28s: thưa, để khoảng lặng đáng sợ hơn
     } else if (this.currentDangerLevel === 3) {
-      delayMs = 12000 + Math.random() * 10000; // 12-22s
+      delayMs = 24000 + Math.random() * 18000; // 24-42s
     } else {
-      delayMs = 20000 + Math.random() * 15000; // 20-35s
+      delayMs = 40000 + Math.random() * 30000; // 40-70s
     }
 
     this.screamsTimeout = window.setTimeout(() => {
@@ -671,83 +671,100 @@ class SoundEngine {
     o.stop(start + 0.25);
   }
 
-  // Mỗi chủ đề: tốc độ, hợp âm theo ô nhịp và cách chơi. Giai điệu thưa, lặp lại nhẹ, mỗi vòng có biến thể ngẫu nhiên.
+  // Tiếng gió/khí lạnh trườn lên rồi tắt: nhiễu lọc thấp, nổi chậm, giống hơi thở của thành phố chết.
+  private swell(start: number, dur: number, vol: number, cutoff = 500) {
+    if (!this.ctx || !this.musicGain) return;
+    const len = Math.max(1, Math.floor(this.ctx.sampleRate * dur));
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(cutoff * 0.5, start);
+    f.frequency.linearRampToValueAtTime(cutoff, start + dur * 0.6);
+    f.frequency.linearRampToValueAtTime(cutoff * 0.4, start + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.linearRampToValueAtTime(vol, start + dur * 0.55);
+    g.gain.linearRampToValueAtTime(0.0001, start + dur);
+    src.connect(f);
+    f.connect(g);
+    g.connect(this.musicGain);
+    src.start(start);
+  }
+
+  // Nốt "chập chờn": ngân lên rồi đứt quãng như đèn hỏng, mỗi lần chập là một nhịp ngắt.
+  private flicker(freq: number, start: number, dur: number, vol: number, cutoff = 900) {
+    const gaps = [0, 0.5, 0.62, 1.1];
+    gaps.forEach((g, i) => {
+      if (g * dur >= dur) return;
+      this.tone(freq, start + g * dur, dur * (i % 2 ? 0.08 : 0.3), 'triangle', vol * (i % 2 ? 0.6 : 1), 0.01, cutoff);
+    });
+  }
+
+  // Mỗi chủ đề: rất chậm, thưa, nhiều khoảng lặng. Nền là drone trầm và hợp âm lệch (nốt thứ 2, nửa cung), giai điệu chỉ vài nốt lẻ loi.
   private scheduleBar(theme: MusicTheme, t0: number, bar: number) {
     const rnd = (arr: number[]) => arr[Math.floor(Math.random() * arr.length)];
-    const triad = (root: number, minor: boolean) => [root, root + (minor ? 3 : 4), root + 7];
-    const addPad = (root: number, minor: boolean, dur: number, vol: number, extra = 0) => {
-      triad(root, minor).forEach((n, i) => {
-        this.tone(this.midi(n), t0, dur, 'triangle', vol, dur * 0.35, 900);
-        this.tone(this.midi(n) * (1.003 + i * 0.001), t0, dur, 'sine', vol * 0.6, dur * 0.4);
-      });
-      if (extra) this.tone(this.midi(root + extra), t0, dur, 'sine', vol * 0.5, dur * 0.4);
+    const chance = (p: number) => Math.random() < p;
+    // Drone trầm hai nốt hơi lệch tông tạo cảm giác bất an
+    const drone = (root: number, dur: number, vol: number) => {
+      this.tone(this.midi(root), t0, dur, 'sine', vol, dur * 0.35, 220);
+      this.tone(this.midi(root) * 1.012, t0, dur, 'sine', vol * 0.7, dur * 0.4, 260);
+      this.tone(this.midi(root + 7), t0, dur, 'sine', vol * 0.35, dur * 0.5, 300);
     };
 
     if (theme === 'home') {
-      // "Hy vọng": D trưởng, chậm rãi, ấm và sáng. Pad mềm + rải hợp âm + chuông thưa
-      const spb = 60 / 70;
-      const prog = [[50, false], [45, false], [47, true], [43, false]] as [number, boolean][];
-      const [root, minor] = prog[bar % 4];
-      addPad(root, minor, spb * 4, 0.06);
-      const notes = triad(root + 12, minor);
-      for (let i = 0; i < 8; i++) {
-        const n = notes[[0, 1, 2, 1, 2, 1, 0, 2][i]];
-        this.tone(this.midi(n + 12), t0 + i * spb * 0.5, spb * 1.2, 'triangle', 0.045, 0.01, 2200);
-      }
-      const pent = [74, 76, 78, 81, 83, 86];
-      if (bar % 2 === 0) this.tone(this.midi(rnd(pent)), t0 + spb * rnd([0, 1, 2]), spb * 2.5, 'sine', 0.05, 0.02);
-      if (bar % 4 === 3) this.tone(this.midi(rnd(pent)), t0 + spb * 3, spb * 3, 'sine', 0.04, 0.05);
+      // Chỗ trú: một ngọn nến sắp tắt. E thứ, hộp nhạc cũ vỡ giọng, nốt thưa, nền ấm nhưng buồn
+      const spb = 60 / 46;
+      const roots = [40, 36, 38, 35];
+      drone(roots[bar % 4], spb * 4, 0.07);
+      [64, 67, 71].forEach((n, i) => this.tone(this.midi(n - 12), t0 + i * 0.05, spb * 4, 'triangle', 0.022, spb * 1.8, 700));
+      if (chance(0.7)) this.tone(this.midi(rnd([71, 72, 74, 76, 79])), t0 + spb * rnd([0.5, 1.5, 2.5]), spb * 2.4, 'sine', 0.04, 0.01, 2000);
+      if (chance(0.25)) this.tone(this.midi(rnd([59, 60, 63])), t0 + spb * 3, spb * 2, 'sine', 0.03, 0.02, 1500);
+      if (chance(0.2)) this.swell(t0 + spb, spb * 3, 0.012, 400);
       return spb * 4;
     }
     if (theme === 'map') {
-      // Bản đồ thế giới: A dorian, nhịp bước đi, bass đi bộ và sáo xa
-      const spb = 60 / 84;
-      const prog = [[45, true], [43, false], [50, false], [40, true]] as [number, boolean][];
-      const [root, minor] = prog[bar % 4];
-      addPad(root + 12, minor, spb * 4, 0.045);
-      this.tone(this.midi(root), t0, spb * 1.6, 'sine', 0.1, 0.02, 500);
-      this.tone(this.midi(root + 7), t0 + spb * 2, spb * 1.6, 'sine', 0.08, 0.02, 500);
-      this.tone(this.midi(root + 12), t0 + spb * 3, spb * 0.9, 'sine', 0.05, 0.02, 500);
-      const dorian = [69, 71, 72, 74, 76, 78, 79, 81];
-      if (bar % 2 === 1 || Math.random() < 0.4) {
-        const st = rnd([0, 1, 2]);
-        this.tone(this.midi(rnd(dorian)), t0 + spb * st, spb * 2.2, 'sine', 0.055, 0.12, 0, 4);
-        if (Math.random() < 0.5) this.tone(this.midi(rnd(dorian)), t0 + spb * (st + 2), spb * 1.6, 'sine', 0.045, 0.1, 0, 4);
-      }
+      // Bản đồ: đường phố hoang. Gió hú xa, drone D thấp, một nốt sáo lạnh rồi im lặng rất lâu
+      const spb = 60 / 50;
+      const roots = [38, 38, 36, 34];
+      drone(roots[bar % 4], spb * 4, 0.065);
+      this.swell(t0, spb * 4, 0.02, 650);
+      if (chance(0.55)) this.tone(this.midi(rnd([62, 65, 67, 69, 70])), t0 + spb * rnd([0, 1, 2]), spb * 3.2, 'sine', 0.045, spb * 0.8, 1400, 3);
+      if (chance(0.2)) this.tone(this.midi(rnd([50, 53, 55])), t0 + spb * 3, spb * 1.4, 'triangle', 0.04, 0.2, 500);
       return spb * 4;
     }
     if (theme === 'danger') {
-      // Vùng nguy hiểm: A phrygian, dồn dập, bass bốc, trống nén, đoạn leo thang
-      const spb = 60 / 128;
-      const root = bar % 8 < 4 ? 33 : 34; // A1 / Bb1 gây căng
-      for (let i = 0; i < 8; i++) {
-        const st = t0 + i * spb * 0.5;
-        this.tone(this.midi(root + (i % 4 === 3 ? 12 : 0)), st, spb * 0.45, 'sawtooth', 0.07, 0.005, 420 + (bar % 4) * 80);
-        this.noiseHit(st, 0.05, i % 2 ? 0.03 : 0.015, 7000);
-      }
-      for (let i = 0; i < 4; i++) if (i % 2 === 0 || bar % 4 === 3) this.kick(t0 + i * spb, 0.16);
-      if (bar % 2 === 0) {
-        [root + 24, root + 27, root + 31].forEach((n) => this.tone(this.midi(n), t0 + spb * 2, spb * 0.8, 'square', 0.025, 0.01, 1400));
-      }
-      if (bar % 4 === 3) {
-        for (let k = 0; k < 6; k++) this.tone(this.midi(root + 36 + k), t0 + spb * (2 + k * 0.33), spb * 0.4, 'sawtooth', 0.02, 0.01, 2500);
-      }
+      // Nguy hiểm: không dồn dập mà ngạt thở. Nhịp tim rất chậm dưới nền, nốt lệch tritone, khí lạnh trườn lên và những lần chập điện
+      const spb = 60 / 58;
+      const root = bar % 8 < 4 ? 31 : 30;
+      drone(root, spb * 4, 0.085);
+      this.tone(this.midi(root + 6), t0 + spb * 0.5, spb * 3.2, 'sine', 0.03, spb * 1.4, 400); // tritone: căng thẳng không giải quyết
+      this.kick(t0, 0.07);
+      this.kick(t0 + spb * 0.42, 0.045);
+      if (bar % 2 === 1) { this.kick(t0 + spb * 2, 0.06); this.kick(t0 + spb * 2.42, 0.04); }
+      this.swell(t0 + spb * rnd([0, 1]), spb * 3, 0.022, 800);
+      if (chance(0.45)) this.flicker(this.midi(root + 24 + rnd([0, 1, 6])), t0 + spb * rnd([1, 2]), spb * 1.6, 0.03, 1100);
+      if (chance(0.18)) this.noiseHit(t0 + spb * rnd([1, 2, 3]), 0.5, 0.02, 3500);
+      if (bar % 4 === 3 && chance(0.5)) this.synthesizeDistantWail(2);
       return spb * 4;
     }
     if (theme === 'despair') {
-      // Tuyệt vọng: D thứ, rất chậm, nốt lệch gây khó chịu, tiếng piano lẻ loi và tiếng vọng xa
-      const spb = 60 / 52;
-      this.tone(this.midi(38), t0, spb * 4, 'sine', 0.09, spb * 1.2, 300);
-      this.tone(this.midi(45), t0, spb * 4, 'sine', 0.05, spb * 1.4, 400);
+      // Tuyệt vọng: gần như im lặng. Một nốt trầm kéo dài, nốt lệch nửa cung, tiếng vọng xa
+      const spb = 60 / 40;
+      this.tone(this.midi(38), t0, spb * 4, 'sine', 0.085, spb * 1.4, 260);
+      this.tone(this.midi(38) * 1.01, t0, spb * 4, 'sine', 0.05, spb * 1.5, 260);
       if (bar % 2 === 0) {
-        [50, 53, 57].forEach((n) => this.tone(this.midi(n), t0, spb * 4, 'triangle', 0.035, spb * 1.5, 800));
-        this.tone(this.midi(51), t0 + spb, spb * 3, 'sine', 0.018, spb, 900); // nốt thứ 2 lệch, gây u ám
+        [50, 53, 57].forEach((n) => this.tone(this.midi(n), t0, spb * 4, 'triangle', 0.02, spb * 1.8, 600));
+        this.tone(this.midi(51), t0 + spb, spb * 3, 'sine', 0.016, spb, 800);
       } else {
-        [48, 51, 55].forEach((n) => this.tone(this.midi(n), t0, spb * 4, 'triangle', 0.035, spb * 1.5, 800));
+        [48, 51, 55].forEach((n) => this.tone(this.midi(n), t0, spb * 4, 'triangle', 0.02, spb * 1.8, 600));
       }
-      const scale = [62, 65, 67, 69, 70, 72];
-      if (Math.random() < 0.75) this.tone(this.midi(rnd(scale)), t0 + spb * rnd([0.5, 1.5, 2.5]), spb * 3.2, 'triangle', 0.06, 0.005, 1500);
-      if (Math.random() < 0.15) this.synthesizeDistantWail(3);
+      if (chance(0.5)) this.tone(this.midi(rnd([62, 65, 67, 69])), t0 + spb * rnd([0.5, 1.5, 2.5]), spb * 3.2, 'triangle', 0.045, 0.02, 1300);
+      if (chance(0.3)) this.swell(t0 + spb, spb * 3, 0.016, 350);
+      if (chance(0.12)) this.synthesizeDistantWail(3);
       return spb * 4;
     }
     return 4;

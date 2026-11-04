@@ -69,6 +69,7 @@ import type { RoleId } from './data/companionChat';
 import { SceneIllustration } from './components/SceneIllustration';
 import { encodeMapAction, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
 import { BaseHub } from './components/BaseHub';
+import { rq, addQty, fmtNamed, servingOf } from './data/units';
 import { tickBase, payCost, MODULE_BY_ID, SHELTER_SUITABILITY, applyBaseDelta } from './utils/baseSystem';
 import { exposureOf } from './data/raid';
 import { getSetting } from './data/settings';
@@ -405,8 +406,27 @@ export default function App() {
       };
 
       setPendingEvents(data.pending_events || []);
-      setSettingId(data.settingId || scenarioId || 'apartment_survivors');
+      const startSettingId = data.settingId || scenarioId || 'apartment_survivors';
+      setSettingId(startSettingId);
       setZone(data.zone || 'shelter');
+      // Xuất phát ở chỗ đủ vững (chung cư, nhà riêng, siêu thị, trạm y tế) thì đó chính là căn cứ của bạn.
+      const startSuit = SHELTER_SUITABILITY[startSettingId];
+      if (startSuit && startSuit.score >= 55) {
+        const st = getSetting(startSettingId);
+        setBase((b) => ({
+          ...b,
+          hasBase: true,
+          name: `Căn cứ ${st.place}`,
+          location: st.labels.shelter,
+          description: `Chỗ trú đủ vững để thành căn cứ: ${startSuit.pros[0].toLowerCase()}.`,
+          fortification: 15 + Math.round(startSuit.score / 5),
+          base_type: startSuit.kind,
+          modules: { ...(b.modules || {}) },
+          fuel: b.fuel || 0,
+        }));
+        setRecentBaseBanner(`Căn cứ ${st.place}`);
+        setTimeout(() => setRecentBaseBanner(null), 6000);
+      }
       setAwayTurns(0);
       setOutposts(generateOutposts(4));
       bumpSeen(initialTurn.scene_id);
@@ -594,7 +614,7 @@ export default function App() {
         data.itemsGained.forEach((gItem: Item) => {
           const existing = updatedInventory.find((it) => it.name === gItem.name);
           if (existing) {
-            existing.quantity += gItem.quantity;
+            addQty(existing, gItem.quantity);
           } else {
             updatedInventory.push(gItem);
           }
@@ -603,10 +623,10 @@ export default function App() {
 
       team.loot.forEach((gItem: Item) => {
         const ex = updatedInventory.find((it) => it.name === gItem.name);
-        if (ex) ex.quantity += gItem.quantity;
+        if (ex) addQty(ex, gItem.quantity);
         else updatedInventory.push(gItem);
       });
-      if (team.loot.length) setLootNotifications((prev) => [...prev, ...team.loot.map((g) => `${g.name} x${g.quantity}`)]);
+      if (team.loot.length) setLootNotifications((prev) => [...prev, ...team.loot.map((g) => `${fmtNamed(g)}`)]);
       setTeamLog([...team.log, ...bt.log]);
       setLoopStatus(bt.loopStatus);
 
@@ -614,7 +634,7 @@ export default function App() {
         data.itemsLost.forEach((lItem: { name: string; quantity: number }) => {
           const existing = updatedInventory.find((it) => it.name.includes(lItem.name));
           if (existing) {
-            existing.quantity = Math.max(0, existing.quantity - lItem.quantity);
+            existing.quantity = rq(Math.max(0, existing.quantity - lItem.quantity));
           }
         });
         updatedInventory = updatedInventory.filter((it) => it.quantity > 0);
@@ -864,8 +884,10 @@ export default function App() {
     const isSpoiled = item.category === 'food' && item.freshness !== undefined && item.freshness < 30;
 
     let hpChange = item.healAmount || 0;
-    let hungerChange = item.hungerReduce ? -item.hungerReduce : 0;
-    let thirstChange = item.thirstReduce ? -item.thirstReduce : 0;
+    const people = 1 + companions.filter((c) => c.status !== 'deceased').length;
+    const serving = servingOf(item, people);
+    let hungerChange = serving.hunger ? -serving.hunger : 0;
+    let thirstChange = serving.thirst ? -serving.thirst : 0;
     let infectionChange = item.infectionReduce ? -item.infectionReduce : 0;
 
     if (isSpoiled) {
@@ -900,7 +922,7 @@ export default function App() {
     const newInfection = Math.max(0, Math.min(100, player.stats.infection + infectionChange));
 
     const updatedInv = player.inventory
-      .map((it) => (it.id === item.id ? { ...it, quantity: it.quantity - 1 } : it))
+      .map((it) => (it.id === item.id ? { ...it, quantity: rq(it.quantity - serving.used) } : it))
       .filter((it) => it.quantity > 0);
 
     setPlayer({
@@ -969,13 +991,13 @@ export default function App() {
   const handleStoreItem = (item: Item, quantity: number = 1) => {
     const qtyToMove = Math.min(item.quantity, quantity);
     let updatedBackpack = player.inventory
-      .map((it) => (it.id === item.id ? { ...it, quantity: it.quantity - qtyToMove } : it))
+      .map((it) => (it.id === item.id ? { ...it, quantity: rq(it.quantity - qtyToMove) } : it))
       .filter((it) => it.quantity > 0);
 
     let updatedWarehouse = [...base.warehouse];
     const existingInWarehouse = updatedWarehouse.find((it) => it.name === item.name);
     if (existingInWarehouse) {
-      existingInWarehouse.quantity += qtyToMove;
+      addQty(existingInWarehouse, qtyToMove);
     } else {
       updatedWarehouse.push({ ...item, quantity: qtyToMove });
     }
@@ -988,13 +1010,13 @@ export default function App() {
   const handleRetrieveItem = (item: Item, quantity: number = 1) => {
     const qtyToMove = Math.min(item.quantity, quantity);
     let updatedWarehouse = base.warehouse
-      .map((it) => (it.id === item.id ? { ...it, quantity: it.quantity - qtyToMove } : it))
+      .map((it) => (it.id === item.id ? { ...it, quantity: rq(it.quantity - qtyToMove) } : it))
       .filter((it) => it.quantity > 0);
 
     let updatedBackpack = [...player.inventory];
     const existingInBackpack = updatedBackpack.find((it) => it.name === item.name);
     if (existingInBackpack) {
-      existingInBackpack.quantity += qtyToMove;
+      addQty(existingInBackpack, qtyToMove);
     } else {
       updatedBackpack.push({ ...item, quantity: qtyToMove });
     }
@@ -1371,6 +1393,8 @@ export default function App() {
   // Propose Intimacy
   const handleProposeIntimacy = (companionId: string) => {
     sound.playLoot();
+    const partner = companions.find((c) => c.id === companionId);
+    if (partner) pushLog('survival', `Đêm ấy bạn và ${partner.name} gần nhau hơn, giữa căn phòng kín và những tiếng động xa xa`);
     setCompanions((prev) =>
       prev.map((c) => {
         if (c.id === companionId) {
@@ -1679,7 +1703,7 @@ export default function App() {
                   title="Mở ba lô hành trang"
                 >
                   <Package className="w-3.5 h-3.5" />
-                  <span>Ba Lô ({player.inventory.reduce((a, b) => a + b.quantity, 0)})</span>
+                  <span>Ba Lô ({player.inventory.length})</span>
                 </button>
 
                 <button
@@ -2146,7 +2170,7 @@ export default function App() {
               onQuarantineCompanion={handleQuarantineCompanion}
               onTreatIncubation={handleTreatIncubation}
               onPurgeCompanion={handlePurgeCompanion}
-              hasSafeBase={base.hasBase && base.fortification >= 50}
+              hasSafeBase={zone === 'shelter' && !worldFlags.includes('raid_warned')}
               playerGender={player.gender}
               onOpenChat={(c) => { setShowCompanions(false); setChatCompanionId(c.id); }}
               onClose={() => setShowCompanions(false)}

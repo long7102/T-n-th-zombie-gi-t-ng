@@ -135,12 +135,12 @@ export function tickBase(base: BaseCamp, weather: WeatherType, turn: number): Ti
   // 1) Nước: mưa + giếng
   const rc = lvl(base, 'rain_collector');
   if (rc) {
-    const amount = rc * (weather === 'heavy_rain' ? 3 : 1);
-    addItem(wh, { name: 'Nước mưa hứng (chưa đun)', thirstReduce: 30, needsCooking: true, canSpoil: false, description: 'Nước hứng từ mái, cần đun sôi.' }, amount, 30);
+    const amount = rc * (weather === 'heavy_rain' ? 3 : 1) * 3;
+    addItem(wh, { name: 'Nước mưa hứng (chưa đun)', unit: 'l', thirstReduce: 55, needsCooking: true, canSpoil: false, description: 'Tính theo lít. Nước hứng từ mái, cần đun sôi.' }, amount, 60);
     status.rain_collector = 'ok';
   }
   const well = lvl(base, 'well');
-  if (well) addItem(wh, { name: 'Nước giếng đun sôi', thirstReduce: 40, canSpoil: false, description: 'Nước giếng trong chỗ trú, đã lọc sạch.' }, well, 30);
+  if (well) addItem(wh, { name: 'Nước giếng đun sôi', unit: 'l', thirstReduce: 55, canSpoil: false, description: 'Tính theo lít. Nước giếng trong chỗ trú, đã lọc sạch.' }, well * 3, 60);
 
   // 2) Bếp: nấu chín đồ sống, tốn nhiên liệu
   const stove = lvl(base, 'stove') || (base.facilities.hasStove ? 1 : 0);
@@ -148,14 +148,15 @@ export function tickBase(base: BaseCamp, weather: WeatherType, turn: number): Ti
   if (stove) {
     for (const it of wh) {
       if (cooked >= stove * 2) break;
-      if (it.category === 'food' && it.needsCooking && !it.isCooked && !it.thirstReduce) {
+      if (it.category === 'food' && it.quantity > 0 && it.needsCooking && !it.isCooked && !it.thirstReduce) {
         if (!getFuel(1)) { status.stove = 'starved'; out.log.push('Bếp hết nhiên liệu, đồ sống chưa thể nấu.'); break; }
-        const n = Math.min(it.quantity, stove * 2 - cooked);
-        const donePart: Item = { ...it, id: `${it.id}_c`, quantity: n, name: `${it.name} (nấu chín)`, needsCooking: false, isCooked: true, hungerReduce: (it.hungerReduce || 20) + 10, canSpoil: true, freshness: 100 };
-        it.quantity -= n;
+        // Gạo nấu theo kg (nửa ký mỗi cấp bếp một lượt); đồ đếm theo cái nấu theo phần.
+        const n = it.unit === 'kg' ? Math.min(it.quantity, stove * 0.5) : Math.min(it.quantity, stove * 2 - cooked);
+        const donePart: Item = { ...it, id: `${it.id}_c`, quantity: n, name: `${it.name} (nấu chín)`, needsCooking: false, isCooked: true, hungerReduce: it.unit === 'kg' ? Math.round((it.hungerReduce || 350) * 1.15) : (it.hungerReduce || 20) + 10, canSpoil: true, freshness: 100 };
+        it.quantity = Math.round((it.quantity - n) * 100) / 100;
         const ex = wh.find((i) => i.name === donePart.name);
-        if (ex) ex.quantity += n; else wh.push(donePart);
-        cooked += n;
+        if (ex) ex.quantity = Math.round((ex.quantity + n) * 100) / 100; else wh.push(donePart);
+        cooked += it.unit === 'kg' ? Math.ceil(n * 2) : n;
         status.stove = 'ok';
       }
     }
@@ -168,10 +169,11 @@ export function tickBase(base: BaseCamp, weather: WeatherType, turn: number): Ti
     const raw = wh.find((i) => i.thirstReduce && i.needsCooking && i.quantity > 0);
     if (raw) {
       if (getFuel(1)) {
-        const n = Math.min(raw.quantity, pur * 2);
-        raw.quantity -= n;
-        addItem(wh, { name: 'Nước đun sôi', thirstReduce: 40, canSpoil: false, description: 'Nước đã lọc và đun sôi, uống an toàn.' }, n, 30);
-        out.log.push(`Đun sôi và lọc ${n} bình nước sạch.`);
+        const litres = raw.unit === 'l';
+        const n = Math.min(raw.quantity, litres ? pur * 3 : pur * 2);
+        raw.quantity = Math.round((raw.quantity - n) * 100) / 100;
+        addItem(wh, litres ? { name: 'Nước đun sôi', unit: 'l', thirstReduce: 55, canSpoil: false, description: 'Tính theo lít. Nước đã lọc và đun sôi, uống an toàn.' } : { name: 'Nước đun sôi', thirstReduce: 40, canSpoil: false, description: 'Nước đã lọc và đun sôi, uống an toàn.' }, n, 60);
+        out.log.push(litres ? `Đun sôi và lọc ${n} lít nước sạch.` : `Đun sôi và lọc ${n} bình nước sạch.`);
         status.purifier = 'ok';
       } else status.purifier = 'starved';
     }

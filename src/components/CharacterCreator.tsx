@@ -28,7 +28,7 @@ export const CharacterCreator: React.FC<CharacterCreatorProps> = ({ onComplete, 
   const [mode, setMode] = useState<'preset' | 'custom'>('preset');
   const [selectedScenarioIdx, setSelectedScenarioIdx] = useState(0);
   const [customPrompt, setCustomPrompt] = useState('');
-  const [companionOption, setCompanionOption] = useState<string>('nhauyen');
+  const [companionOption, setCompanionOption] = useState<string>('none');
 
   const currentScenario = STARTING_SCENARIOS[selectedScenarioIdx];
 
@@ -38,7 +38,7 @@ export const CharacterCreator: React.FC<CharacterCreatorProps> = ({ onComplete, 
     const randScenario = Math.floor(Math.random() * STARTING_SCENARIOS.length);
     const randGender = Math.random() > 0.5 ? 'male' : 'female';
     const companions = ['none', 'nhauyen', 'mailan', 'phuonglinh', 'bichtram', 'tieumy'];
-    const randComp = companions[Math.floor(Math.random() * companions.length)];
+    const randComp = Math.random() < 0.8 ? 'none' : companions[Math.floor(Math.random() * companions.length)];
 
     setName(randName);
     setGender(randGender);

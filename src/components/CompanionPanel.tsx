@@ -498,7 +498,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({
                       }`}
                       title={
                         !hasSafeBase
-                          ? 'Cần có căn cứ an toàn để ngỏ lời thân mật'
+                          ? 'Cần ở trong chỗ trú yên ổn (không đang ngoài đường, không có nguy cơ bị tấn công) để ngỏ lời'
                           : (comp.affection || 0) < 85
                           ? 'Cần Thiện cảm >= 85'
                           : 'Cần Lòng tin >= 80'
@@ -508,7 +508,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({
                       <span>
                         {hasSafeBase && (comp.affection || 0) >= 85 && comp.trust >= 80
                           ? 'Bày Tỏ Tình Cảm & Quan Hệ Thân Mật ❤️'
-                          : `Đề Nghị Thân Mật (Cần Căn Cứ & Thiện Cảm 85: hiện ${comp.affection || 0})`}
+                          : !hasSafeBase ? 'Đề Nghị Thân Mật (cần về chỗ trú yên ổn)' : `Đề Nghị Thân Mật (Thiện cảm ${comp.affection || 0}/85, Lòng tin ${comp.trust}/80)`}
                       </span>
                     </button>
                   )}

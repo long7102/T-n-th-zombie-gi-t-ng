@@ -424,6 +424,18 @@ export const ROUTINE_SCENES: RoutineScene[] = [
   ...STORY_SCENES,
   // ============ CHỖ TRÚ ============
   {
+    id: 'r_fill_water', zones: ['shelter'], primary: 'shelter',
+    only: ['apartment_survivors', 'private_house', 'supermarket_lockdown', 'clinic_containment'],
+    when: (c) => !c.waterCut && c.day <= 6 && !c.flags.includes('water_stored'),
+    need: (c) => !c.waterCut && c.day <= 6 && !c.flags.includes('water_stored'),
+    situation: () => 'Vòi nước trong {shelter} vẫn còn chảy, nhưng áp lực yếu hẳn và nước đục dần. Ai cũng biết chuyện này không kéo dài: khi trạm bơm ngừng chạy, mọi thứ sẽ khô cạn trong một đêm. Còn kịp xả nước ra tích trữ.',
+    choices: [
+      { text: 'Xả đầy mọi thứ chứa được: bồn tắm, xô, chậu, nồi, can', outcome: 'Bạn chạy khắp nơi hứng nước đến khi tay rã rời. Nước máy chưa đun, nhưng đây là thứ quý nhất khi vòi khô: hơn hai chục lít nằm sẵn trong các xô chậu.', stats: { stamina: -9, sanity: 3 }, gain: [{ id: 'water_tap', name: 'Nước máy trữ trong xô và nồi', category: 'food', unit: 'l', quantity: 22, thirstReduce: 55, needsCooking: true, canSpoil: false, description: 'Tính theo lít. Phải đun sôi mới an toàn.' }], flags: ['water_stored'] },
+      { text: 'Chỉ đổ đầy chai và can nhỏ rồi đóng chặt nắp', outcome: 'Bạn chọn cách gọn: mỗi chai một lít, vặn kín nắp, xếp dọc chân tường. Không nhiều bằng cách kia nhưng dễ mang theo và đỡ bị đổ.', stats: { stamina: -4, sanity: 2 }, gain: [{ id: 'water_bottle_home', name: 'Chai nước đun sôi để nguội 1L', category: 'food', quantity: 5, thirstReduce: 40, canSpoil: false, description: 'Nước uống sạch dự trữ, tính theo chai.' }], flags: ['water_stored'] },
+      { text: 'Đun sôi một nồi lớn, để nguội rồi chia vào chai', outcome: 'Việc đun nấu mất cả buổi và tốn gas, nhưng bạn có được vài chai nước sạch, không phải lo bụng đau khi uống.', stats: { stamina: -7, sanity: 3 }, gain: [{ id: 'water_boiled_batch', name: 'Chai nước đun sôi để nguội 1L', category: 'food', quantity: 4, thirstReduce: 40, canSpoil: false, description: 'Nước uống sạch dự trữ, tính theo chai.' }, { id: 'water_tap2', name: 'Nước máy trữ trong xô và nồi', category: 'food', unit: 'l', quantity: 8, thirstReduce: 55, needsCooking: true, canSpoil: false, description: 'Tính theo lít. Phải đun sôi mới an toàn.' }], flags: ['water_stored'] },
+    ],
+  },
+  {
     id: 'r_inventory_check', zones: ['shelter'], primary: 'shelter',
     situation: () => 'Trong {shelter}, bạn nhận ra mình cần biết chắc mình đang có gì. Một cái đếm kỹ sẽ giúp bạn phân chia khẩu phần cho những ngày sắp tới.',
     choices: [
