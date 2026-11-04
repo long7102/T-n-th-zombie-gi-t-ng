@@ -435,6 +435,73 @@ export const ROUTINE_SCENES: RoutineScene[] = [
       { text: 'Đun sôi một nồi lớn, để nguội rồi chia vào chai', outcome: 'Việc đun nấu mất cả buổi và tốn gas, nhưng bạn có được vài chai nước sạch, không phải lo bụng đau khi uống.', stats: { stamina: -7, sanity: 3 }, gain: [{ id: 'water_boiled_batch', name: 'Chai nước đun sôi để nguội 1L', category: 'food', quantity: 4, thirstReduce: 40, canSpoil: false, description: 'Nước uống sạch dự trữ, tính theo chai.' }, { id: 'water_tap2', name: 'Nước máy trữ trong xô và nồi', category: 'food', unit: 'l', quantity: 8, thirstReduce: 55, needsCooking: true, canSpoil: false, description: 'Tính theo lít. Phải đun sôi mới an toàn.' }], flags: ['water_stored'] },
     ],
   },
+  // ============ SINH HOẠT THƯỜNG NGÀY TRONG CHỖ TRÚ ============
+  {
+    id: 'r_stairwell_listen', zones: ['shelter'], primary: 'shelter', only: ['apartment_survivors'], weight: 2,
+    situation: () => 'Sau cánh cửa thoát hiểm, cầu thang bộ có tiếng cạ nhẹ, lúc có lúc không, lúc xa lúc gần. Ở tầng cao thế này, thứ duy nhất leo lên được tới đây là những gì đang đi bộ trong cầu thang. Bạn cần biết chúng đã lên tới tầng nào.',
+    choices: [
+      { text: 'Áp tai vào cánh cửa sắt, đếm tiếng bước chân', outcome: 'Bạn nín thở nghe rất lâu. Chỉ có một, có lẽ hai con, đang lê bước ở khoảng tầng bốn. Chưa đủ để chặn cửa nhưng đủ để bạn ngủ không yên.', stats: { stamina: -2, sanity: -2 } },
+      { text: 'Thả sợi dây gắn lon rỗng xuống khoảng giếng cầu thang để báo động', outcome: 'Bạn thả dây qua khe lan can, buộc đầu kia vào tay nắm cửa. Từ giờ, có ai đi qua tầng dưới là bạn nghe tiếng lon va vào tường.', stats: { stamina: -4, sanity: 3 }, flags: ['stair_alarm'] },
+      { text: 'Không làm gì cả, chỉ khóa thêm chốt rồi lùi vào trong', outcome: 'Bạn kiểm tra lại chốt, kéo thêm cái ghế chèn dưới tay nắm và lùi vào phòng. Đôi khi biết ít lại dễ ngủ hơn.', stats: { sanity: -1 } },
+    ],
+  },
+  {
+    id: 'r_power_flicker', zones: ['shelter'], primary: 'shelter', weight: 1.5,
+    when: (c) => !c.blackout && c.day >= 2,
+    situation: () => 'Đèn trần chớp một cái rồi sáng lại, yếu hơn trước. Điện lưới còn chập chờn, và bạn biết sẽ có lúc nó tắt hẳn. Những thứ cần điện nên được tận dụng ngay khi còn.',
+    choices: [
+      { text: 'Sạc đầy điện thoại, pin dự phòng và đèn pin', outcome: 'Bạn cắm hết mọi thứ có thể sạc vào ổ điện. Đèn báo xanh nhấp nháy từng cái một, khiến bạn thấy được một chút an tâm vô lý.', stats: { stamina: -1, sanity: 3 } },
+      { text: 'Đun nước sôi bằng ấm điện, đổ đầy phích và chai', outcome: 'Ấm điện reo lên rồi ngắt. Bạn rót nước sôi vào mọi thứ chứa được. Nước nóng này sẽ nguội dần nhưng vẫn sạch.', stats: { stamina: -3 }, gain: [{ id: 'pf_boiled', name: 'Chai nước đun sôi để nguội 1L', category: 'food', quantity: 2, thirstReduce: 40, canSpoil: false, description: 'Nước uống sạch dự trữ, tính theo chai.' }] },
+      { text: 'Nấu hết đồ đông lạnh trong tủ lạnh trước khi nó rã đông', outcome: 'Bạn nấu một mẻ lớn, ăn một phần và để phần còn lại nguội dần. Mùi thơm lan ra khiến bạn phải kéo rèm kín hơn.', stats: { stamina: -4, sanity: 2 }, roll: { table: 'fridge', n: 3 } },
+    ],
+  },
+  {
+    id: 'r_window_watch', zones: ['shelter'], primary: 'shelter', weight: 1.5,
+    situation: () => 'Qua khe rèm, bạn nhìn xuống con phố từ trên cao. Có những thứ chỉ thấy rõ khi đứng đủ xa: lối nào bầy zombie hay đi, nhà nào còn đèn, chỗ nào còn khói bếp.',
+    choices: [
+      { text: 'Ghi lại các lối đi của bầy zombie trong ngày', outcome: 'Bạn ghi từng đợt chúng đi qua, từng hướng rẽ. Sau một lúc, bạn nhận ra chúng không đi ngẫu nhiên: chúng bị kéo về phía tiếng động.', stats: { sanity: 2 } },
+      { text: 'Đếm số nhà còn đèn và khói bếp để biết còn ai sống', outcome: 'Bạn đếm được ba ô cửa có ánh sáng yếu và một cột khói mảnh. Con số nhỏ đến đau lòng, nhưng không phải bằng không.', stats: { sanity: 1 } },
+      { text: 'Tìm chỗ để mai lén xuống lấy đồ mà không bị thấy', outcome: 'Bạn nhớ từng ô cửa sổ vỡ, từng bóng khuất, từng chiếc xe chắn đường. Khi cần đi, bạn sẽ không phải đi mù.', stats: { stamina: -1, sanity: 1 } },
+    ],
+  },
+  {
+    id: 'r_clean_up', zones: ['shelter'], primary: 'shelter', weight: 1,
+    situation: () => 'Quần áo bạn dính mồ hôi, bụi và những thứ bạn không muốn nghĩ tới. Mùi người sống nồng hơn bạn tưởng, và mùi là thứ lũ zombie rất nhạy.',
+    choices: [
+      { text: 'Lau người bằng khăn ẩm và thay áo sạch', outcome: 'Một chậu nước nhỏ và chiếc khăn cũ đủ để bạn thấy mình lại là người. Quần áo bẩn được gói kín trong túi nhựa.', stats: { stamina: -2, sanity: 4, infection: -2 } },
+      { text: 'Giặt và phơi đồ trong nhà để mùi không bay ra ngoài', outcome: 'Bạn giặt nhanh bằng chút xà phòng, vắt kiệt rồi phơi trong phòng kín. Cả căn nhà thoang thoảng mùi ẩm, nhưng không còn mùi mồ hôi.', stats: { stamina: -4, sanity: 2 } },
+      { text: 'Chỉ rửa tay mặt, để dành nước cho việc khác', outcome: 'Bạn tiết kiệm từng ca nước. Không sạch bằng, nhưng bạn còn nước để nấu và uống.', stats: { stamina: -1, sanity: -1 } },
+    ],
+  },
+  {
+    id: 'r_ration_plan', zones: ['shelter'], primary: 'shelter', weight: 1.5,
+    when: (c) => c.day >= 2,
+    situation: () => 'Bạn ngồi xuống đếm lại gạo, mì, nước và dầu ăn, rồi chia ra từng bữa. Chưa biết bao giờ mới có thêm, nên mỗi quyết định về khẩu phần là một canh bạc với chính cái bụng của mình.',
+    choices: [
+      { text: 'Chia đều ba bữa nhỏ mỗi ngày để dạ dày quen dần', outcome: 'Bạn tính từng bữa, mỗi bữa vừa đủ để không đói run tay. Sau hai ngày bạn thấy người đỡ lả, dù bụng chưa bao giờ thực sự no.', stats: { stamina: 2, sanity: 2 } },
+      { text: 'Ăn một bữa thật no, nhịn các bữa còn lại', outcome: 'Một bữa no cho bạn sức lực để làm việc nặng, nhưng đến chiều bụng đã réo. Bạn thấy rõ vì sao người ta hay lén ăn vụng.', stats: { stamina: 3, hunger: 6, sanity: -1 } },
+      { text: 'Giảm một phần khẩu phần để kéo dài thêm vài ngày', outcome: 'Bạn bớt phần mình đi một nắm gạo mỗi bữa. Con số tổng kết đẹp hơn, còn cơ thể thì đang trả giá bằng sự uể oải.', stats: { stamina: -3, hunger: 4, sanity: 1 } },
+    ],
+  },
+  {
+    id: 'r_old_memory', zones: ['shelter'], primary: 'shelter', weight: 1,
+    situation: () => 'Trong ngăn kéo có một tấm ảnh cũ, một chiếc đồng hồ không còn chạy và vài bức thư chưa mở. Những thứ vô dụng nhất bỗng nặng nhất khi chẳng còn ai để hỏi.',
+    choices: [
+      { text: 'Ngồi xem ảnh rất lâu, nhớ từng gương mặt', outcome: 'Bạn không khóc, chỉ thấy cổ họng nghẹn lại. Khi cất ảnh đi, bạn thấy mình đã nhớ ra lý do mình phải sống.', stats: { sanity: 5, stamina: -1 } },
+      { text: 'Mở thư ra đọc, dù không chắc muốn biết gì bên trong', outcome: 'Những dòng chữ viết tay của một thời bình thường, những lời hẹn không bao giờ thành. Bạn gấp lại cẩn thận, tim đập khác thường.', stats: { sanity: 2 } },
+      { text: 'Đóng ngăn kéo lại, tập trung vào việc cần làm hôm nay', outcome: 'Bạn đẩy ngăn kéo vào. Có những thứ chỉ nên đối mặt khi đủ sức, và hôm nay bạn chưa đủ.', stats: { sanity: -1, stamina: 1 } },
+    ],
+  },
+  {
+    id: 'r_pipe_noise', zones: ['shelter'], primary: 'shelter', weight: 1,
+    when: (c) => c.day >= 3 && !c.waterCut,
+    situation: () => 'Ống nước trong tường bất ngờ kêu rền, rồi vòi bật ra một đợt nước đục. Đường ống đang thông trở lại, có thể chỉ vài phút. Cũng có thể đó là ai đó đang mở van ở tầng dưới.',
+    choices: [
+      { text: 'Hứng nhanh mọi thứ chứa được vào xô và nồi', outcome: 'Bạn lao vào bếp, đặt xô, chậu, nồi dưới vòi. Nước đục nhưng nhiều, và chỉ trong vài phút vòi lại tắt.', stats: { stamina: -3, sanity: 2 }, gain: [{ id: 'pipe_water', name: 'Nước máy trữ trong xô và nồi', category: 'food', unit: 'l', quantity: 8, thirstReduce: 55, needsCooking: true, canSpoil: false, description: 'Tính theo lít. Phải đun sôi mới an toàn.' }] },
+      { text: 'Đóng chặt van tổng, nghe xem tiếng nước từ đâu tới', outcome: 'Bạn khóa van rồi áp tai vào tường. Tiếng nước xa dần, không có tiếng người, nhưng bạn không chắc chắn điều gì.', stats: { stamina: -1, sanity: -1 } },
+      { text: 'Để nước chảy một lúc cho trong rồi hứng bình sạch', outcome: 'Bạn kiên nhẫn chờ nước bớt đục rồi hứng vào chai. Ít hơn, nhưng sạch hơn, trước khi dòng nước lịm dần.', stats: { stamina: -2 }, gain: [{ id: 'pipe_bottle', name: 'Chai nước đun sôi để nguội 1L', category: 'food', quantity: 2, thirstReduce: 40, canSpoil: false, description: 'Nước uống sạch dự trữ, tính theo chai.' }] },
+    ],
+  },
   {
     id: 'r_inventory_check', zones: ['shelter'], primary: 'shelter',
     situation: () => 'Trong {shelter}, bạn nhận ra mình cần biết chắc mình đang có gì. Một cái đếm kỹ sẽ giúp bạn phân chia khẩu phần cho những ngày sắp tới.',
@@ -763,8 +830,8 @@ export const ROUTINE_SCENES: RoutineScene[] = [
     id: 'r_kitchen_drawers', zones: ['shelter', 'near'], primary: 'near', weight: 1,
     situation: () => 'Bạn chợt nhớ ở {near} còn khu bếp chung bị bỏ ngỏ. Ngăn tủ, hộc bếp, tủ bát: không ai nghĩ sẽ có gì quý ở đó, nhưng những thứ thiết thực thường nằm ở những nơi ít ai để mắt.',
     choices: [
-      { text: 'Lục tủ bát và ngăn kéo bếp, tìm dụng cụ nấu và gia vị', outcome: 'Bạn nhấc từng chiếc nồi, mở từng hũ gia vị. Có những thứ làm bữa ăn đỡ nhạt hơn rất nhiều.', stats: { stamina: -4 }, roll: [{ table: 'household', n: 2 }, { table: 'tools', n: 1, chance: 0.5 }] },
-      { text: 'Kiểm tra tủ lạnh và tủ đông xem còn gì ăn được không', outcome: 'Mùi xộc lên khiến bạn nhăn mặt. Vài thứ còn có thể cứu được nếu nấu thật kỹ.', stats: { stamina: -3, sanity: -3 }, roll: [{ table: 'fridge', n: 2 }] },
+      { text: 'Vét sạch bếp: lấy hết gạo, mì, dầu, muối, gia vị và mọi nguyên liệu nấu ăn', outcome: 'Bạn không chừa lại thứ gì. Từng túi gạo, gói mì, chai dầu, hũ muối, hũ đường đều được gom vào bao. Trong thời buổi này, nguyên liệu nấu ăn đáng giá hơn vàng.', stats: { stamina: -7 }, roll: [{ table: 'pantry', n: 30 }, { table: 'tools', n: 1, chance: 0.5 }] },
+      { text: 'Kiểm tra tủ lạnh và tủ đông xem còn gì ăn được không', outcome: 'Mùi xộc lên khiến bạn nhăn mặt. Vài thứ còn có thể cứu được nếu nấu thật kỹ.', stats: { stamina: -3, sanity: -3 }, roll: [{ table: 'fridge', n: 8 }] },
       { text: 'Tìm thứ không phải đồ ăn: đồ vệ sinh, đồ dùng gia đình', outcome: 'Những thứ bình thường như xà phòng, chăn, sách bỗng trở nên quý giá.', stats: { stamina: -4, sanity: 2 }, roll: [{ table: 'domestic', n: 3 }] },
     ],
   },

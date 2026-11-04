@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { fmtQty } from '../data/units';
 import { X, Home, ArrowRight, AlertTriangle, Check } from 'lucide-react';
 import { BaseCamp, Item } from '../types/game';
-import { MODULES, MODULE_BY_ID, SHELTER_SUITABILITY, costStatus, lvl } from '../utils/baseSystem';
+import { MODULES, MODULE_BY_ID, SHELTER_SUITABILITY, costStatus, lvl, fortifyActionsFor } from '../utils/baseSystem';
 import { itemIcon } from '../utils/itemIcon';
 import { BaseCutaway } from './BaseCutaway';
 import { Companion } from '../types/game';
@@ -18,7 +18,9 @@ interface Props {
   placeName: string;
   loopStatus: Record<string, 'ok' | 'starved' | 'off'>;
   onEstablish: () => void;
+  onAbandon: () => void;
   onBuild: (moduleId: string) => void;
+  onFortify: (actionId: string) => void;
   companions: Companion[];
   exposure: Exposure;
   vehicle: Vehicle | null;
@@ -41,8 +43,8 @@ const LOOP: { id: string; label: string; icon: string }[] = [
   { id: 'generator', label: 'Điện', icon: '⚡' },
 ];
 
-export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLabel, placeName, loopStatus, onEstablish, onBuild, companions, exposure, vehicle, onBuildVehicle, onRepairVehicle, onRefuelVehicle, onStoreItem, onRetrieveItem, onClose }) => {
-  const [tab, setTab] = useState<'overview' | 'build' | 'garage' | 'store'>('overview');
+export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLabel, placeName, loopStatus, onEstablish, onAbandon, onBuild, onFortify, companions, exposure, vehicle, onBuildVehicle, onRepairVehicle, onRefuelVehicle, onStoreItem, onRetrieveItem, onClose }) => {
+  const [tab, setTab] = useState<'overview' | 'fortify' | 'build' | 'garage' | 'store'>('overview');
   const suit = SHELTER_SUITABILITY[settingId] || SHELTER_SUITABILITY.apartment_survivors;
 
   const loopColor = (id: string) => {
@@ -64,7 +66,16 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
               <p className="text-[11px] text-neutral-400 sm:text-xs">{base.hasBase ? `Kiên cố ${base.fortification}% · Nhiên liệu ${base.fuel || 0}` : 'Chưa có căn cứ cố định. Lập tại chỗ trú, hoặc tìm một cứ điểm tốt hơn trên bản đồ.'}</p>
             </div>
           </div>
-          <button onClick={onClose} className="cursor-pointer rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white" aria-label="Đóng"><X className="h-5 w-5" /></button>
+          <div className="flex items-center gap-2">
+            {base.hasBase && (
+              <button
+                onClick={() => { if (window.confirm('Bỏ căn cứ này? Công trình và độ kiên cố sẽ mất, đồ trong kho được chuyển vào ba lô. Sau đó bạn có thể tới nơi khác và chiếm làm căn cứ mới.')) onAbandon(); }}
+                className="cursor-pointer rounded-lg border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-300 transition-colors hover:border-red-700 hover:text-red-300"
+                title="Rời chỗ này để lập căn cứ ở nơi khác"
+              >Bỏ căn cứ này</button>
+            )}
+            <button onClick={onClose} className="cursor-pointer rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white" aria-label="Đóng"><X className="h-5 w-5" /></button>
+          </div>
         </div>
 
         {!base.hasBase ? (
@@ -93,7 +104,7 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
         ) : (
           <>
             <div className="flex gap-1.5 border-b border-neutral-800 bg-neutral-950/30 p-3">
-              {([['overview', 'Vòng khép kín'], ['build', 'Công trình'], ['garage', 'Garage & xe'], ['store', 'Kho căn cứ']] as const).map(([k, label]) => (
+              {([['overview', 'Vòng khép kín'], ['fortify', 'Gia cố'], ['build', 'Công trình'], ['garage', 'Garage & xe'], ['store', 'Kho căn cứ']] as const).map(([k, label]) => (
                 <button key={k} onClick={() => { sound.playClick(); setTab(k); }} className={`cursor-pointer rounded px-3 py-1.5 text-xs font-medium transition-colors ${tab === k ? 'bg-neutral-200 text-neutral-900' : 'bg-neutral-800/80 text-neutral-400 hover:text-white'}`}>{label}</button>
               ))}
             </div>
@@ -134,6 +145,42 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
                     <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3"><div className="font-mono text-[10px] uppercase text-neutral-400">Kiên cố</div><div className="text-lg font-bold text-white">{base.fortification}%</div></div>
                     <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3"><div className="font-mono text-[10px] uppercase text-neutral-400">Nhiên liệu</div><div className="text-lg font-bold text-amber-300">{base.fuel || 0}</div></div>
                     <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3"><div className="font-mono text-[10px] uppercase text-neutral-400">Điện</div><div className={`text-lg font-bold ${base.facilities.hasGeneratorAndFridge ? 'text-emerald-300' : 'text-neutral-500'}`}>{base.facilities.hasGeneratorAndFridge ? 'Đang chạy' : 'Tắt'}</div></div>
+                  </div>
+                </div>
+              )}
+
+              {tab === 'fortify' && (
+                <div className="space-y-3">
+                  <p className="text-xs leading-relaxed text-neutral-400">Các việc dưới đây hợp với đúng chỗ ở của bạn. Mỗi việc làm một lần. Độ kiên cố hiện tại: <span className="font-bold text-white">{base.fortification}%</span>. Việc "che giấu" giúp căn cứ bớt lộ diện thay vì chỉ dày thêm tường.</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {fortifyActionsFor(settingId).map((a) => {
+                      const done = (base.fortified || []).includes(a.id);
+                      const st = costStatus(a.cost, backpack, base.warehouse);
+                      const ok = st.every((c) => c.ok);
+                      return (
+                        <div key={a.id} className={`flex flex-col rounded-xl border p-3.5 ${done ? 'border-emerald-900 bg-emerald-950/20' : 'border-neutral-800 bg-neutral-950/60'}`}>
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2"><span className="text-xl">{a.icon}</span><span className="text-sm font-bold text-white">{a.name}</span></div>
+                            <span className="shrink-0 font-mono text-[11px] text-amber-300">{a.gain ? `+${a.gain}% kiên cố` : ''}{a.stealth ? ` -${a.stealth} lộ diện` : ''}</span>
+                          </div>
+                          <p className="mb-1.5 text-[11px] leading-relaxed text-neutral-400">{a.desc}</p>
+                          {!done && (
+                            <div className="mb-2 space-y-0.5 text-[11px]">
+                              {st.length === 0 ? <div className="text-neutral-400">Không tốn vật tư, chỉ tốn sức ({a.stamina} thể lực)</div> : st.map((c) => (
+                                <div key={c.label} className={c.ok ? 'text-emerald-300' : 'text-red-300'}>{c.ok ? <Check className="mr-1 inline h-3 w-3" /> : <AlertTriangle className="mr-1 inline h-3 w-3" />}{c.label}: {Math.min(c.have, c.need)}/{c.need}</div>
+                              ))}
+                            </div>
+                          )}
+                          <button
+                            disabled={done || !ok}
+                            onClick={() => { sound.playLoot(); onFortify(a.id); }}
+                            className="mt-auto w-full cursor-pointer rounded border border-emerald-700 bg-emerald-900/60 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition-colors hover:bg-emerald-800 disabled:cursor-not-allowed disabled:border-neutral-800 disabled:bg-neutral-900 disabled:text-neutral-500"
+                          >
+                            {done ? 'Đã làm' : ok ? 'Thực hiện' : 'Thiếu vật tư'}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

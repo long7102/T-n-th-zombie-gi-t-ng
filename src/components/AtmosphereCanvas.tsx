@@ -262,15 +262,15 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
     const blackout = cityPowerBlackout || (day || 1) >= 10;
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
-    let width = (canvas.width = window.innerWidth);
-    let height = (canvas.height = window.innerHeight);
+    let width = (canvas.width = Math.max(1, window.innerWidth));
+    let height = (canvas.height = Math.max(1, window.innerHeight));
     let rafId = 0;
     const seed = 1337 + Math.floor((day || 1) / 2);
     let stat = drawStatic(width, height, pal, key, blackout, seed);
 
     const onResize = () => {
-      width = canvas.width = window.innerWidth;
-      height = canvas.height = window.innerHeight;
+      width = canvas.width = Math.max(1, window.innerWidth);
+      height = canvas.height = Math.max(1, window.innerHeight);
       stat = drawStatic(width, height, pal, key, blackout, seed);
     };
     window.addEventListener('resize', onResize);
@@ -291,7 +291,7 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
 
     const render = () => {
       time += 0.016;
-      ctx.drawImage(stat, 0, 0);
+      if (stat.width > 0 && stat.height > 0) ctx.drawImage(stat, 0, 0);
 
       clouds.forEach((cl) => {
         cl.x += cl.v;

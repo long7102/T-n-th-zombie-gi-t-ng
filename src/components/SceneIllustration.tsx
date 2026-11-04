@@ -3,7 +3,8 @@ import { WeatherType } from '../types/game';
 
 // Tranh minh họa vẽ bằng SVG theo từng cảnh: bầu trời đổi theo thời tiết, đường chân trời
 // khác nhau theo mã cảnh (seed), và một "chủ đề" tiền cảnh riêng (cửa sổ, phố, sân thượng,
-// bầy zombie, thùng tiếp tế, cầu vượt, bệnh viện, Bunker 13, tháp...). Tĩnh hoàn toàn, không chớp.
+// bầy zombie, thùng tiếp tế, cầu vượt, bệnh viện, Bunker 13, tháp...). Chuyển động rất nhẹ, chậm
+// (khói trôi, lửa chập chờn, sương, mưa, sao nhấp nháy); tắt hẳn khi người dùng chọn giảm chuyển động.
 
 type Motif = 'room' | 'street' | 'rooftop' | 'horde' | 'supply' | 'bridge' | 'hospital' | 'bunker' | 'tower' | 'storm';
 
@@ -58,6 +59,33 @@ function rng(seedStr: string) {
   };
 }
 
+const MOTION_CSS = `
+.si-smoke{animation:si-drift 11s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
+@keyframes si-drift{0%,100%{transform:translateX(0) scaleX(1);opacity:.26}50%{transform:translateX(5px) scaleX(1.1);opacity:.4}}
+.si-glow{animation:si-pulse 7s ease-in-out infinite}
+@keyframes si-pulse{0%,100%{opacity:.1}50%{opacity:.22}}
+.si-fog{animation:si-fogmove 36s ease-in-out infinite alternate}
+@keyframes si-fogmove{from{transform:translateX(-46px)}to{transform:translateX(46px)}}
+.si-flame{animation:si-flick 2.6s linear infinite;transform-box:fill-box;transform-origin:50% 100%}
+@keyframes si-flick{0%,100%{opacity:.9;transform:scale(1)}18%{opacity:.55;transform:scale(.88)}36%{opacity:1;transform:scale(1.1)}58%{opacity:.7;transform:scale(.95)}78%{opacity:.95;transform:scale(1.04)}}
+.si-star{animation:si-twinkle 4.5s ease-in-out infinite}
+@keyframes si-twinkle{0%,100%{opacity:.25}50%{opacity:.85}}
+.si-rain{animation:si-rainfall .8s linear infinite}
+@keyframes si-rainfall{from{transform:translate(0,-12px)}to{transform:translate(-3px,12px)}}
+.si-sway{animation:si-sway 8s ease-in-out infinite alternate;transform-box:fill-box;transform-origin:50% 0}
+@keyframes si-sway{from{transform:skewX(-1.4deg)}to{transform:skewX(1.6deg)}}
+.si-bolt{animation:si-bolt 9s infinite}
+@keyframes si-bolt{0%,91%,100%{opacity:0}92%{opacity:.7}94%{opacity:.08}95%{opacity:.85}97%{opacity:0}}
+.si-ring{animation:si-ring 3.6s ease-out infinite;transform-box:fill-box;transform-origin:center}
+@keyframes si-ring{0%{transform:scale(.7);opacity:.7}100%{transform:scale(1.5);opacity:0}}
+.si-shamble{animation:si-shamble 3.4s ease-in-out infinite alternate}
+@keyframes si-shamble{from{transform:translate(0,0)}to{transform:translate(1.6px,1px)}}
+.si-sun{animation:si-pulse 8s ease-in-out infinite}
+.si-wave{animation:si-wave 5s ease-in-out infinite alternate}
+@keyframes si-wave{from{transform:translateX(-5px)}to{transform:translateX(5px)}}
+@media (prefers-reduced-motion: reduce){.si-smoke,.si-glow,.si-fog,.si-flame,.si-star,.si-rain,.si-sway,.si-bolt,.si-ring,.si-shamble,.si-sun,.si-wave{animation:none}}
+`;
+
 interface Props {
   sceneId?: string;
   weather: WeatherType;
@@ -91,7 +119,7 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
   const celestial =
     weather === 'heatwave' ? (
       <g>
-        <circle cx="262" cy="26" r="34" fill="#f59e0b" opacity="0.18" />
+        <circle className="si-sun" cx="262" cy="26" r="34" fill="#f59e0b" opacity="0.18" />
         <circle cx="262" cy="26" r="14" fill="#fbbf24" opacity="0.85" />
       </g>
     ) : weather === 'night_dark' ? (
@@ -99,7 +127,7 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
         <circle cx="64" cy="26" r="11" fill="#dbe7ff" opacity="0.85" />
         <circle cx="69" cy="23" r="10" fill={top} />
         {art.stars.map((s, i) => (
-          <circle key={i} cx={s.x} cy={s.y} r={s.s} fill="#cfe0ff" opacity="0.7" />
+          <circle key={i} className="si-star" style={{ animationDelay: `${(i % 9) * 0.5}s` }} cx={s.x} cy={s.y} r={s.s} fill="#cfe0ff" opacity="0.7" />
         ))}
       </g>
     ) : (
@@ -113,13 +141,20 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
         return (
           <g>
             <rect x="0" y="0" width="320" height="120" fill="none" stroke="#05070a" strokeWidth="26" />
-            <path d="M0 0H44L30 120H0Z" fill="#12100f" opacity="0.9" />
-            <path d="M320 0H276L292 120H320Z" fill="#12100f" opacity="0.9" />
+            <path className="si-sway" d="M0 0H44L30 120H0Z" fill="#12100f" opacity="0.9" />
+            <path className="si-sway" style={{ animationDelay: '-3s' }} d="M320 0H276L292 120H320Z" fill="#12100f" opacity="0.9" />
             <rect x="158" y="0" width="4" height="120" fill="#05070a" />
             <rect x="0" y="58" width="320" height="4" fill="#05070a" />
             <path d="M0 120V104H320V120Z" fill="#05070a" />
             <rect x="238" y="92" width="30" height="12" rx="2" fill="#1a1512" />
-            <circle cx="253" cy="88" r="3.5" fill={dark ? '#f59e0b' : '#7c4a14'} opacity={dark ? 0.9 : 0.5} />
+            <path d="M34 8L156 116M156 8L34 116M164 8L286 116M286 8L164 116" stroke="#a8a08c" strokeWidth="1.6" opacity="0.28" />
+            <g fill="#04040a" opacity="0.96">
+              <circle cx="226" cy="86" r="4.4" />
+              <path d="M219 92Q226 88 233 93L236 106H216Z" />
+              <path d="M233 96L244 98" stroke="#04040a" strokeWidth="2.4" fill="none" />
+            </g>
+            <circle className="si-glow" cx="253" cy="84" r="12" fill="#f59e0b" opacity="0.14" />
+            <ellipse className="si-flame" cx="253" cy="87" rx="2.4" ry="4" fill={dark ? '#fbbf24' : '#b8741c'} opacity={dark ? 0.95 : 0.6} />
           </g>
         );
       case 'street':
@@ -158,10 +193,12 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
           <g>
             <path d="M0 120V104Q160 96 320 104V120Z" fill="#05060a" />
             {art.crowd.map((c, i) => (
-              <g key={i} transform={`translate(${c.x} ${c.y}) scale(${c.s})`} fill="#07090d" stroke="#1a222b" strokeWidth="0.6">
-                <circle cx={c.lean} cy="-18" r="3.2" />
-                <path d={`M${c.lean - 3} -15L${c.lean + 3} -15L4 4H-4Z`} />
-                <path d={`M${c.lean - 3} -13L${c.lean - 12} -6M${c.lean + 3} -13L${c.lean + 12} -7`} fill="none" />
+              <g key={i} className="si-shamble" style={{ animationDelay: `${-(i % 7) * 0.5}s` }}>
+                <g transform={`translate(${c.x} ${c.y}) scale(${c.s})`} fill="#07090d" stroke="#1a222b" strokeWidth="0.6">
+                  <circle cx={c.lean} cy="-18" r="3.2" />
+                  <path d={`M${c.lean - 3} -15L${c.lean + 3} -15L4 4H-4Z`} />
+                  <path d={`M${c.lean - 3} -13L${c.lean - 12} -6M${c.lean + 3} -13L${c.lean + 12} -7`} fill="none" />
+                </g>
               </g>
             ))}
             <rect x="0" y="0" width="320" height="120" fill="#7f1d1d" opacity="0.1" />
@@ -221,7 +258,7 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
             <path d="M96 104Q160 52 224 104" fill="none" stroke="#1a232d" />
             <rect x="140" y="86" width="40" height="18" fill="#04060a" stroke="#2a3642" />
             {[10, 18, 26].map((r) => (
-              <circle key={r} cx="160" cy="50" r={r} fill="none" stroke="#34d399" strokeWidth="0.7" opacity={0.55 - r * 0.012} />
+              <circle key={r} className="si-ring" style={{ animationDelay: `${(r / 8) * 0.6}s` }} cx="160" cy="50" r={r} fill="none" stroke="#34d399" strokeWidth="0.7" opacity={0.55 - r * 0.012} />
             ))}
             <circle cx="160" cy="50" r="2.2" fill="#34d399" />
           </g>
@@ -245,9 +282,9 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
         return (
           <g>
             <path d="M0 120V100H320V120Z" fill="#04050a" />
-            <path d="M0 108Q40 102 80 108T160 108T240 108T320 108V120H0Z" fill="#0f1b2a" opacity="0.8" />
-            <path d="M0 114Q40 108 80 114T160 114T240 114T320 114V120H0Z" fill="#14263a" opacity="0.7" />
-            <path d="M210 0L196 34H210L200 62" fill="none" stroke="#c7d7ff" strokeWidth="1.4" opacity="0.5" />
+            <g className="si-wave"><path d="M-10 108Q40 102 80 108T160 108T240 108T330 108V120H-10Z" fill="#0f1b2a" opacity="0.8" /></g>
+            <g className="si-wave" style={{ animationDelay: '-2.5s' }}><path d="M-10 114Q40 108 80 114T160 114T240 114T330 114V120H-10Z" fill="#14263a" opacity="0.7" /></g>
+            <path className="si-bolt" d="M210 0L196 34H210L200 62" fill="none" stroke="#c7d7ff" strokeWidth="1.4" opacity="0.5" />
           </g>
         );
     }
@@ -261,10 +298,33 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
       className="block h-36 w-full rounded-lg border border-neutral-800 sm:h-48"
       role="img"
       aria-label="Minh họa cảnh hiện tại"
-      style={{ filter: 'sepia(0.32) saturate(0.8) contrast(1.06)' }}
+      style={{ filter: 'contrast(1.1) brightness(0.94)', background: '#0b0a09' }}
       preserveAspectRatio="xMidYMid slice"
     >
+      <style>{MOTION_CSS}</style>
       <defs>
+        {/* Phong cách This War of Mine: nét run tay, gần như đơn sắc, chỉ giữ ánh đèn vàng ấm; hạt giấy và vết bẩn phủ lên */}
+        <filter id={`twm-${sceneId}`} x="-3%" y="-3%" width="106%" height="106%" colorInterpolationFilters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="0.035 0.05" numOctaves="2" seed="7" result="warp" />
+          <feDisplacementMap in="SourceGraphic" in2="warp" scale="2.6" xChannelSelector="R" yChannelSelector="G" result="wob" />
+          <feColorMatrix in="wob" type="saturate" values="0.14" result="mono" />
+          <feComponentTransfer in="mono" result="toned">
+            <feFuncR type="gamma" amplitude="1.08" exponent="1.25" offset="0" />
+            <feFuncG type="gamma" amplitude="1.0" exponent="1.3" offset="0" />
+            <feFuncB type="gamma" amplitude="0.86" exponent="1.4" offset="0" />
+          </feComponentTransfer>
+        </filter>
+        <filter id={`grain-${sceneId}`} x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="11" />
+          <feColorMatrix type="matrix" values="0 0 0 0 0.05  0 0 0 0 0.04  0 0 0 0 0.03  0 0 0 0.9 -0.28" />
+        </filter>
+        <filter id={`stain-${sceneId}`} x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.02" numOctaves="3" seed="4" />
+          <feColorMatrix type="matrix" values="0 0 0 0 0.02  0 0 0 0 0.015  0 0 0 0 0.01  0 0 0 1.1 -0.52" />
+        </filter>
+        <pattern id={`hatch-${sceneId}`} width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(32)">
+          <line x1="0" y1="0" x2="0" y2="5" stroke="#000" strokeWidth="0.7" opacity="0.5" />
+        </pattern>
         <linearGradient id={`sky-${sceneId}`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor={top} />
           <stop offset="1" stopColor={bottom} />
@@ -279,6 +339,7 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
         </radialGradient>
       </defs>
 
+      <g filter={`url(#twm-${sceneId})`}>
       <rect width="320" height="120" fill={`url(#sky-${sceneId})`} />
       {celestial}
 
@@ -305,24 +366,31 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
 
       {/* Ánh lửa và khói đen ở chân trời: cảm giác thành phố vẫn đang cháy */}
       <g style={{ pointerEvents: 'none' }}>
-        <ellipse cx="70" cy="96" rx="60" ry="22" fill={GLOW[weather]} opacity="0.16" />
-        <ellipse cx="250" cy="100" rx="50" ry="18" fill={GLOW[weather]} opacity="0.12" />
-        <path d="M66 96 C62 76 76 66 68 46 C64 32 74 22 70 8" stroke="#0a0808" strokeWidth="9" fill="none" opacity="0.32" strokeLinecap="round" />
-        <path d="M252 100 C256 84 246 74 254 56 C258 44 250 34 254 24" stroke="#0a0808" strokeWidth="7" fill="none" opacity="0.26" strokeLinecap="round" />
+        <ellipse className="si-glow" cx="70" cy="96" rx="60" ry="22" fill={GLOW[weather]} opacity="0.16" />
+        <ellipse className="si-glow" style={{ animationDelay: '-3s' }} cx="250" cy="100" rx="50" ry="18" fill={GLOW[weather]} opacity="0.12" />
+        <path className="si-smoke" d="M66 96 C62 76 76 66 68 46 C64 32 74 22 70 8" stroke="#0a0808" strokeWidth="9" fill="none" opacity="0.32" strokeLinecap="round" />
+        <path className="si-smoke" style={{ animationDelay: '-5s' }} d="M252 100 C256 84 246 74 254 56 C258 44 250 34 254 24" stroke="#0a0808" strokeWidth="7" fill="none" opacity="0.26" strokeLinecap="round" />
       </g>
-      <rect width="320" height="120" fill={`url(#fog-${sceneId})`} />
+      <g className="si-fog"><rect x="-60" width="440" height="120" fill={`url(#fog-${sceneId})`} /></g>
       {foreground}
 
       {showRain && (
-        <g stroke="#a9c4e6" strokeWidth="0.7" opacity="0.4">
+        <g className="si-rain" stroke="#a9c4e6" strokeWidth="0.7" opacity="0.4">
           {art.rain.map((d, i) => (
             <line key={i} x1={d.x} y1={d.y} x2={d.x - 3} y2={d.y + d.l} />
           ))}
         </g>
       )}
 
+      </g>
+
+      {/* Nét than gạch chéo ở vùng tối, vết bẩn, hạt giấy và vignette dày */}
+      <rect width="320" height="120" fill={`url(#hatch-${sceneId})`} opacity="0.16" style={{ mixBlendMode: 'multiply' }} />
+      <rect width="320" height="120" filter={`url(#stain-${sceneId})`} opacity="0.55" />
+      <rect width="320" height="120" filter={`url(#grain-${sceneId})`} opacity="0.55" style={{ mixBlendMode: 'multiply' }} />
       {dangerLevel >= 3 && <rect width="320" height="120" fill="#7f1d1d" opacity={0.05 * (dangerLevel - 2)} />}
       <rect width="320" height="120" fill={`url(#vig-${sceneId})`} />
+      <rect x="1" y="1" width="318" height="118" fill="none" stroke="#000" strokeWidth="2" opacity="0.55" />
     </svg>
   );
 };

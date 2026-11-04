@@ -31,6 +31,8 @@ export interface ChosenResolution {
   lose: { name: string; quantity: number }[];
   woundChange?: { inflicted?: boolean; healed?: boolean; location?: string } | null;
   newCompanion?: Companion;
+  pendingRecruit?: Companion;   // người vừa được cứu, đang chờ người chơi quyết định nhận hay không
+  clearRecruit?: boolean;
   newSkill?: { name: string; description: string; category: any };
   companionUpdates: any[];
   ending?: { is_game_over: boolean; is_victory: boolean; epilogue?: string; cause_of_death?: string };
@@ -377,6 +379,21 @@ function withMove(r: ChosenResolution, setting: Setting, from: Zone, to: Zone) {
 }
 
 // ---------- Xử lý hành động của người chơi ----------
+const RECRUIT_CHOICES = [
+  'Cho họ ở lại cùng, chia phần ăn và chỗ ngủ',
+  'Đưa ít nước và đồ ăn, để họ tự tìm chỗ khác',
+  'Từ chối: bạn không thể nuôi thêm ai',
+];
+
+function recruitScene(who: any, zone: Zone, setting: Setting): NextScene {
+  return {
+    id: 'r_recruit_decision', kind: 'event', zone,
+    situation: `${who.name} đứng trước mặt bạn, người run run vì đói và sợ. Cứu được người đã khó, giữ họ lại còn khó hơn: thêm một miệng ăn, thêm một người bạn phải tin hoặc phải đề phòng. Bạn có muốn nhận họ vào nhóm không?`,
+    choices: RECRUIT_CHOICES as unknown as [string, string, string],
+    isEmergency: false, dangerLevel: 2, soundCue: 'heartbeat',
+  };
+}
+
 function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: number): ChosenResolution {
   const comps: any[] = req.companions || [];
   const inv: any[] = req.player?.inventory || [];
@@ -386,6 +403,38 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
 
   const action = norm(req.chosenAction || '');
   const sceneId: string = req.sceneId || '';
+
+  // Người vừa được cứu: bạn quyết định nhận họ vào nhóm hay không
+  if (sceneId === 'r_recruit_decision' && req.pendingRecruit) {
+    const who = req.pendingRecruit;
+    const idx = RECRUIT_CHOICES.findIndex((c) => norm(c) === action);
+    const r = blankRes('event', '');
+    r.clearRecruit = true;
+    r.deterministic = true;
+    if (idx === 0) {
+      if (comps.filter((c) => c.status !== 'deceased').length >= 3) {
+        r.outcome = 'Bạn muốn nhận người này, nhưng nhóm đã đủ đông và chỗ trú không đủ phần ăn. Bạn nói thật, và người đó gật đầu hiểu chuyện rồi đi tìm nơi khác.';
+        r.stats = { sanity: -2 };
+      } else {
+        r.outcome = `Bạn gật đầu. ${who.name} thở ra nhẹ nhõm, nhận lấy phần nước bạn đưa. Từ giờ người đó đi cùng bạn, chia phần ăn và phiên canh.`;
+        r.stats = { sanity: 2 };
+        r.newCompanion = who;
+        r.flags = ['saved_stranger'];
+      }
+    } else if (idx === 1) {
+      const food = inv.find((i) => i.category === 'food' && (i.hungerReduce ?? 0) > 0 && (i.quantity ?? 1) > 0 && i.unit !== 'kg');
+      const water = inv.find((i) => (i.thirstReduce ?? 0) > 0 && (i.quantity ?? 1) > 0 && i.unit !== 'l');
+      if (food) r.lose.push({ name: food.name, quantity: 1 });
+      if (water) r.lose.push({ name: water.name, quantity: 1 });
+      r.outcome = `Bạn đưa ${who.name} ${food || water ? 'chút đồ ăn thức uống' : 'lời chỉ đường'} và chỉ hướng nơi có thể trú tạm. Người đó cúi đầu cảm ơn rồi đi, không ngoái lại.`;
+      r.stats = { sanity: -1 };
+    } else {
+      r.outcome = `Bạn lắc đầu: bạn không thể nuôi thêm ai. ${who.name} nhìn bạn rất lâu rồi quay đi. Cánh cửa khép lại, và có gì đó trong bạn cũng nặng hơn.`;
+      r.stats = { sanity: -4 };
+      r.flags = ['abandoned_survivor'];
+    }
+    return r;
+  }
 
   if (req.actionType === 'emergency_timeout') {
     const r = blankRes('timeout', 'Cơ thể bạn đông cứng vì sợ hãi. Khi tỉnh lại, khoảnh khắc quyết định đã trôi qua và hậu quả ập xuống: bạn bị thương và mất bình tĩnh, còn cơ hội cứu người hoặc đoạt đồ đã vuột khỏi tầm tay.');
@@ -422,7 +471,7 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
       r.lose = sr.lose.filter((l) => hasItem(inv, new RegExp(l.name, 'i')));
       if (sr.recruit) {
         if (comps.length >= 3) r.outcome += ' Nhóm của bạn đã đủ đông, người đó đành tìm đường riêng.';
-        else { r.newCompanion = sr.recruit; r.flags = ['saved_stranger']; }
+        else { r.pendingRecruit = sr.recruit; r.outcome += ' Người đó đứng chờ câu trả lời của bạn: có cho đi cùng hay không là quyết định của bạn.'; }
       } else if (sr.abandon) r.flags = ['abandoned_stranger'];
       r.deterministic = true;
       return r;
@@ -432,7 +481,7 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
   // Sự kiện có sẵn
   const ev = eventById(sceneId);
   if (ev) {
-    const ch = ev.choices.find((c) => c.text === action);
+    const ch = localizedEvent(ev, setting).choices.find((c) => norm(c.text) === action);
     if (ch) {
       const reqs = CHOICE_REQUIREMENTS[ch.id] || [];
       const miss = reqs.find((q) => !hasItem(inv, q.re));
@@ -445,7 +494,8 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
       if (ch.rescuesCompanion && ev.survivorCandidate && !comps.some((c) => c.id === ev.survivorCandidate!.id)) {
         if (comps.length >= 3) r.outcome += ' Nhóm của bạn đã đủ đông, người đó đành tìm đường riêng.';
         else {
-          r.newCompanion = anonymize({
+          r.outcome += ' Người đó đứng chờ câu trả lời của bạn: có cho đi cùng hay không là quyết định của bạn.';
+          r.pendingRecruit = anonymize({
             ...ev.survivorCandidate,
             trust: Math.min(100, ev.survivorCandidate.trust + (ch.companionImpact?.trustChange || 0)),
             lastComment: ch.companionImpact?.comment || ev.survivorCandidate.lastComment,
@@ -485,7 +535,8 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
       if (fx.recruit) {
         const cand = REALISTIC_SURVIVOR_ROSTER.find((c) => c.id === fx.recruit);
         if (cand && !comps.some((c) => c.id === cand.id) && comps.length < 3) {
-          r.newCompanion = anonymize({ ...cand, trust: Math.min(100, cand.trust + 30), hasBeenRescued: true }, turn);
+          r.outcome += ' Người đó đứng chờ câu trả lời của bạn: có cho đi cùng hay không là quyết định của bạn.';
+          r.pendingRecruit = anonymize({ ...cand, trust: Math.min(100, cand.trust + 30), hasBeenRescued: true }, turn);
         }
       }
       if (fx.companionStatus && comps[0]) {
@@ -722,6 +773,8 @@ const ITEM_KEYWORDS: { act: RegExp; have: RegExp; label: string }[] = [
 ];
 
 const PLACE_HINTS: { re: RegExp; table: LootTableId; zone: Zone; label: string }[] = [
+  { re: /(?<![\p{L}])bếp(?![\p{L}])|tủ bếp|nguyên liệu|gia vị|đồ khô|kho khô|thùng gạo|hũ gạo/u, table: 'pantry', zone: 'shelter', label: 'tủ bếp và kho đồ khô' },
+  { re: /tủ lạnh|tủ đông/, table: 'fridge', zone: 'shelter', label: 'tủ lạnh' },
   { re: /hiệu thuốc|quầy thuốc|nhà thuốc|tủ thuốc|thuốc men/, table: 'pharmacy', zone: 'outside', label: 'một quầy thuốc' },
   { re: /(?<![\p{L}])(chợ|sạp)(?![\p{L}])/u, table: 'market', zone: 'outside', label: 'khu chợ bỏ hoang' },
   { re: /vườn|rau dại|hái (quả|trái|rau)|ổi|chuối/, table: 'forage', zone: 'outside', label: 'một mảnh vườn bỏ hoang' },
@@ -739,6 +792,7 @@ function detectDestination(a: string, hasRoof: boolean): Zone | null {
   if (/sân thượng|lên mái|lên nóc|leo lên (mái|nóc)/.test(a)) return hasRoof ? 'roof' : null;
   if (/quay (về|lại|vào)|trở (về|lại)|về (phòng|chỗ|nhà|căn hộ|kho|cabin|xe|toa)|vào trong|trốn (vào|trong)/.test(a)) return 'shelter';
   if (/(xuống|ra) (đường|phố|ngoài đường)|tầng trệt|tầng 1\b|sảnh|ra khỏi (tòa|nhà|siêu thị|trạm|toa)|ra đường|đi ra ngoài|ra ngoài/.test(a)) return 'outside';
+  if (/chặn|gia cố|chèn|khóa|rào|nẹp|dựng|đặt bẫy|giăng/.test(a)) return null; // đang gia cố cầu thang/cửa thì vẫn ở trong chỗ trú
   if (/hành lang|cầu thang|ra khỏi phòng|mở cửa|sang phòng|phòng bên cạnh/.test(a)) return 'near';
   return null;
 }
@@ -783,7 +837,8 @@ function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setti
 
   // 2) Ý định chính
   const isCook = W('nấu|luộc|chiên|rang|nướng|đun|hầm').test(a);
-  const isEat = W('ăn|nhai|dùng bữa|nấu|luộc|chiên|nướng|hầm').test(a) && !W('tìm|kiếm|lục|nhặt').test(a.replace(/đồ ăn|thức ăn|thực phẩm/g, ''));
+  const isBoil = W('đun sôi|đun nước|nấu nước|lọc nước').test(a);
+  const isEat = !isBoil && W('ăn|nhai|dùng bữa|nấu|luộc|chiên|nướng|hầm').test(a) && !W('tìm|kiếm|lục|nhặt|vét|lấy|gom|thu gom|mang|hái|moi|lật').test(a.replace(/đồ ăn|thức ăn|thực phẩm|nấu ăn/g, ''));
   const isDrink = W('uống|nhấp nước|giải khát').test(a);
   const isSearch = W('lục|tìm|kiếm|nhặt|moi|mò|lật|lấy|hái|câu|bắt|vơ|thu gom').test(a);
 
@@ -808,14 +863,16 @@ function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setti
     parts.push('Bạn uống từng ngụm nhỏ, để nước thấm xuống cổ họng khô rát.');
     parts.push(tmp.outcome.trim());
     r.stats.thirst = tmp.stats.thirst; r.stats.infection = tmp.stats.infection; r.lose.push(...tmp.lose);
-  } else if (isSearch || place) {
+  } else if (isSearch || (place && !isBoil && !W('chặn|gia cố|chèn|khóa|đặt bẫy|giăng').test(a))) {
     let table: LootTableId | undefined = place?.table;
     if (!table) {
       table = at === 'shelter' ? 'household' : at === 'near' ? 'household' : at === 'roof' ? 'water_raw' : pickFrom<LootTableId>(['vehicle', 'market', 'forage', 'household'], rng);
     }
-    const chance = at === 'shelter' ? 0.5 : 0.72;
-    const found = rng() < chance ? rollLoot(table, at === 'shelter' ? 1 : 2, rng) : [];
-    r.stats.stamina = (r.stats.stamina ?? 0) - 5;
+    // "Lấy hết / vét sạch": mang đi toàn bộ những gì có ở chỗ đó, tốn nhiều sức hơn nhưng không bỏ sót thứ nào
+    const takeAll = W('hết|toàn bộ|sạch|tất cả|vét|không chừa').test(a);
+    const chance = takeAll ? 1 : at === 'shelter' ? 0.5 : 0.72;
+    const found = rng() < chance ? rollLoot(table, takeAll ? 40 : at === 'shelter' ? 1 : 2, rng) : [];
+    r.stats.stamina = (r.stats.stamina ?? 0) - (takeAll ? 9 : 5);
     if (found.length) {
       r.gain = found;
       parts.push(`Bạn lục tìm ${place ? place.label : 'khắp nơi'} thật cẩn thận và nhặt được: ${found.map((f) => `${fmtNamed(f)}`).join(', ')}.`);
@@ -826,9 +883,39 @@ function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setti
   } else if (W('nghỉ|ngủ|chợp mắt|nằm|thư giãn').test(a)) {
     if (at === 'shelter') { r.stats.stamina = 16; r.stats.sanity = 3; parts.push('Bạn nằm xuống giữa chỗ trú quen thuộc, hơi thở dần đều lại, cơ thể dần thả lỏng dù tai vẫn ngóng mọi tiếng động.'); }
     else { r.stats.stamina = 6; r.stats.sanity = -3; parts.push(`Bạn dựa lưng vào góc khuất ở ${setting.labels[at]} chợp mắt chốc lát. Không có gì chắc chắn, nên mỗi tiếng động đều khiến bạn giật mình.`); }
-  } else if (W('chặn|gia cố|chèn|rào|khóa|đóng cửa|dựng|nẹp').test(a)) {
+  } else if (W('đun sôi|đun nước|nấu nước|lọc nước').test(a)) {
+    const rawW = inv.find((i: any) => (i.thirstReduce ?? 0) > 0 && i.needsCooking && !i.isCooked && (i.quantity ?? 1) > 0);
+    if (!rawW) { parts.push('Bạn không có nước chưa đun nào để xử lý.'); }
+    else {
+      const litres = rawW.unit === 'l';
+      const n = litres ? Math.min(rawW.quantity, 4) : Math.min(rawW.quantity, 2);
+      r.lose.push({ name: rawW.name, quantity: n });
+      r.gain = [{ id: uid('boiled'), name: litres ? 'Nước đun sôi' : 'Chai nước đun sôi', category: 'food', quantity: n, ...(litres ? { unit: 'l' as const } : {}), thirstReduce: litres ? 55 : 40, canSpoil: false, rarity: 'common', description: litres ? 'Tính theo lít. Đã đun sôi, an toàn.' : 'Nước đun sôi để nguội, an toàn.' } as Item];
+      r.stats.stamina = (r.stats.stamina ?? 0) - 2;
+      parts.push(`Bạn đun sôi ${litres ? n + ' lít' : n + ' chai'} nước trên bếp dã chiến rồi để nguội. Từ giờ uống không còn lo đau bụng.`);
+    }
+  } else if (W('chặn|gia cố|chèn|rào|khóa|đóng cửa|dựng|nẹp|cầu thang|cửa chính').test(a)) {
     r.stats.stamina = (r.stats.stamina ?? 0) - 6; r.stats.sanity = 3;
-    parts.push('Bạn dồn sức gia cố, chèn thêm đồ nặng và siết chặt từng điểm yếu. Không tuyệt đối an toàn nhưng chắc chắn hơn trước.');
+    if (req?.base?.hasBase && at === 'shelter') {
+      const want = W('cầu thang|cửa chính|cửa').test(a) ? 4 : 3;
+      r.baseDelta = { fortification: want, moduleLoss: [], stolen: [] };
+      parts.push(`Bạn dồn sức gia cố đúng chỗ bạn nghĩ tới, chèn đồ nặng và siết chặt từng điểm yếu. Căn cứ kiên cố thêm ${want}%.`);
+    } else parts.push('Bạn dồn sức gia cố, chèn thêm đồ nặng và siết chặt từng điểm yếu. Không tuyệt đối an toàn nhưng chắc chắn hơn trước.');
+  } else if (W('bẫy|giăng dây|đặt bẫy').test(a)) {
+    const wire = inv.find((i: any) => /dây|đinh|kẽm|thanh sắt/i.test(i.name || '') && (i.quantity ?? 1) > 0);
+    r.stats.stamina = (r.stats.stamina ?? 0) - 4;
+    if (!wire) parts.push('Bạn nhìn quanh nhưng không có dây, đinh hay sắt nào đủ dùng làm bẫy. Bạn đành dùng đồ đạc kê tạm: chỉ đủ báo động khi có tiếng đổ.');
+    else { r.lose.push({ name: wire.name, quantity: 1 }); if (req?.base?.hasBase) r.baseDelta = { fortification: 3, moduleLoss: [], stolen: [] }; parts.push(`Bạn giăng bẫy bằng ${wire.name} ở lối vào. Ai bước vào mà không để ý sẽ phải trả giá.`); }
+  } else if (W('dọn dẹp|dọn|lau|quét|giặt|tắm|rửa').test(a)) {
+    r.stats.stamina = (r.stats.stamina ?? 0) - 3; r.stats.sanity = 3; r.stats.infection = -2;
+    parts.push('Bạn dọn dẹp và rửa ráy. Nơi trú bớt hôi, người bớt dính bẩn, và đầu óc cũng gọn hơn một chút.');
+  } else if (W('viết|nhật ký|cầu nguyện|thiền|hồi tưởng|ngồi lặng').test(a)) {
+    r.stats.stamina = (r.stats.stamina ?? 0) - 1; r.stats.sanity = 5;
+    parts.push('Bạn ngồi lặng, viết vài dòng hoặc thầm nhớ về những người đã mất. Không giải quyết được gì, nhưng bạn thở dễ hơn.');
+  } else if (W('sửa|vá|hàn|siết ốc|bảo dưỡng').test(a)) {
+    const toolI = inv.find((i: any) => /kìm|búa|cờ lê|tua vít|dụng cụ|xà beng/i.test(i.name || ''));
+    r.stats.stamina = (r.stats.stamina ?? 0) - (toolI ? 4 : 7); r.stats.sanity = 1;
+    parts.push(toolI ? `Bạn dùng ${toolI.name} sửa lại chỗ hỏng, từng việc nhỏ làm chỗ trú vững hơn.` : 'Không có dụng cụ đàng hoàng, bạn xoay xở bằng tay và những thứ nhặt được. Mất nhiều sức hơn và chỉ vá tạm.');
   } else if (W('băng bó|băng|sát trùng|rửa vết|chữa|xử lý vết').test(a) && req?.player?.wound?.hasOpenWound) {
     const gauze = matchInvItem(inv, 'băng gạc cồn muối', (i) => i.category === 'medical');
     if (!gauze) return failMissing('custom', 'vật tư y tế');
@@ -854,7 +941,13 @@ function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setti
   } else if (W('chạy|vọt|lao|phi').test(a)) {
     r.stats.stamina = (r.stats.stamina ?? 0) - 7; parts.push('Bạn chạy nhanh, bước chân dội lên nền gạch. Khoảng cách được rút ngắn, nhưng hơi thở thì đã gấp gáp.');
   } else if (!dest) {
-    parts.push('Bạn tính toán từng bước thật thận trọng và tiết kiệm sức, không gây thêm động tĩnh.');
+    // Không khớp ý định nào: vẫn thực hiện theo lời bạn, dùng đồ bạn nhắc tới nếu có, và chịu rủi ro hợp lý
+    const used = matchInvItem(inv, a, () => true);
+    const risky = W('liều|lao vào|đột nhập|phá|đốt|nhảy|leo|trèo|mạo hiểm').test(a);
+    const calm = W('chậm|từ từ|cẩn thận|lặng lẽ|im lặng|nhẹ nhàng').test(a);
+    r.stats.stamina = (r.stats.stamina ?? 0) - (risky ? 8 : calm ? 2 : 4);
+    if (risky) { r.stats.hp = (r.stats.hp ?? 0) - (2 + Math.floor(rng() * 5)); r.stats.sanity = (r.stats.sanity ?? 0) - 2; }
+    parts.push(`Bạn bắt tay vào việc: ${action.replace(/[.!]+$/, '')}.${used ? ` Bạn dùng ${used.name} trong ba lô để làm việc đó.` : ''} ${risky ? 'Việc này liều lĩnh hơn bạn tưởng và bạn phải trả giá bằng vài vết xước.' : calm ? 'Bạn làm thật chậm, thật khẽ, không gây động tĩnh nào.' : 'Mọi việc diễn ra tạm ổn, dù không có gì thay đổi lớn ngay lập tức.'}`);
   }
 
   // 3) Ra ngoài mà hành động tự do thì có thể gặp rủi ro
@@ -922,7 +1015,27 @@ function transition(id: string, zone: Zone, setting: Setting, lock = false): { z
   return { zone: target, lead: moveText(setting, zone, target) };
 }
 
-function eventScene(ev: RandomEvent, inv: any[], leadIn: string, zone: Zone, setting: Setting, lock = false): NextScene {
+// Sự kiện chung được viết lại cho đúng chỗ người chơi đang ở: ở tầng 7 thì không lo nước ngập tầng 2.
+const EVENT_LOCAL: Record<string, Record<string, { description?: string; choices?: Record<string, { text?: string; outcomeNarrative?: string }> }>> = {
+  event_acid_rain_superstorm: {
+    apartment_survivors: {
+      description: 'Tiếng sấm rền vang và mưa xối xả đổ xuống thành phố. Dưới kia các ngõ trũng đã ngập đến đầu gối, nhưng ở tầng 7 nước không lên tới được. Điều đáng lo là mưa tạt qua khung cửa sổ vỡ, mái dột, đường điện chập chờn và nước lạnh thấm vào đồ đạc.',
+      choices: {
+        storm_search_sealed_bunker: { text: 'Chặn các khe cửa sổ, kê xô chậu dưới chỗ dột và dọn đồ ra khỏi vùng ướt', outcomeNarrative: 'Bạn chạy khắp căn hộ nhét chăn vào khe cửa, kê xô dưới từng chỗ dột và kéo đồ khô vào giữa phòng. Cơn mưa gầm rú ngoài kia, nhưng trong này chỉ còn tiếng nước nhỏ giọt và hơi thở của chính bạn.' },
+        storm_brave_elements_scavenge: { text: 'Chờ mưa thưa dần rồi xuống đường lội nước lục soát chiếc xe cứu thương trôi dạt giữa ngã tư' },
+      },
+    },
+  },
+};
+
+function localizedEvent(ev: RandomEvent, setting: Setting): RandomEvent {
+  const loc = EVENT_LOCAL[ev.id]?.[setting.id];
+  if (!loc) return ev;
+  return { ...ev, description: loc.description || ev.description, choices: ev.choices.map((c) => { const o = loc.choices?.[c.id]; return o ? { ...c, text: o.text || c.text, outcomeNarrative: o.outcomeNarrative || c.outcomeNarrative } : c; }) as typeof ev.choices };
+}
+
+function eventScene(rawEv: RandomEvent, inv: any[], leadIn: string, zone: Zone, setting: Setting, lock = false): NextScene {
+  const ev = localizedEvent(rawEv, setting);
   const t = transition(ev.id, zone, setting, lock);
   const choices = ev.choices.map((c) => {
     const miss = (CHOICE_REQUIREMENTS[c.id] || []).filter((q) => !hasItem(inv, q.re));
@@ -1053,7 +1166,10 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
   // Đã chuẩn bị cho trận tấn công thì trận đó phải đến ngay, không để sự kiện ngẫu nhiên chen ngang.
   const raidImminent = !!req.base?.hasBase && zone === 'shelter' && (req.flags || []).includes('raid_warned');
 
-  if (specialAllowed && !finalDay && !raidImminent) {
+  // Người vừa cứu đang chờ quyết định: cảnh này phải đến ngay, trước mọi sự kiện khác.
+  if (req.pendingRecruit) next = recruitScene(req.pendingRecruit, zone, setting);
+
+  if (specialAllowed && !finalDay && !raidImminent && !next) {
     // 1) Cột mốc theo ngày (cột mốc 2 đi qua lịch có báo radio).
     for (let i = 0; i < STORY_MILESTONES.length; i++) {
       const m = STORY_MILESTONES[i];
@@ -1264,6 +1380,7 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
     system_note: plan.systemNote,
     companionUpdates: companionUpdatesFor(req, plan, rng),
     newCompanion: r.newCompanion,
+    ...(r.pendingRecruit ? { pending_recruit: r.pendingRecruit } : r.clearRecruit ? { pending_recruit: null } : {}),
     newSkill: r.newSkill,
     game_ending: victory
       ? {

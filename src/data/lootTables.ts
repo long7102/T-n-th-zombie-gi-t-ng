@@ -10,7 +10,7 @@ import { Item } from '../types/game';
 export type LootTableId =
   | 'household' | 'fridge' | 'market' | 'vehicle' | 'forage' | 'pond' | 'garden'
   | 'water_raw' | 'pharmacy' | 'hardware' | 'warehouse' | 'office'
-  | 'autoparts' | 'weapons' | 'clothing' | 'tools' | 'domestic' | 'electronics' | 'camping';
+  | 'pantry' | 'autoparts' | 'weapons' | 'clothing' | 'tools' | 'domestic' | 'electronics' | 'camping';
 
 interface Entry {
   w: number;                 // trọng số xuất hiện
@@ -150,6 +150,24 @@ export const LOOT: Record<LootTableId, Entry[]> = {
     { w: 4, item: fresh('Khoai lang củ', 32, { needsCooking: true }), q: [1, 3], fresh: [75, 95] },
     { w: 5, item: food('Đồ hộp pate gan', 26, { isSealed: true }) },
     { w: 5, item: food('Đồ hộp cá sốt cà', 32, { isSealed: true }) },
+  ],
+  // Tủ bếp và kho khô: nguyên liệu nấu ăn đủ loại. Khi người chơi "lấy hết" thì mang đi toàn bộ.
+  pantry: [
+    { w: 6, item: raw('Gạo tẻ', 350, { unit: 'kg', description: 'Tính theo kg. Mỗi bữa một người ăn khoảng 100 g.' }), q: [1, 3] },
+    { w: 5, item: raw('Mì tôm gói', 28), q: [3, 8] },
+    { w: 4, item: raw('Bột mì', 300, { unit: 'kg', description: 'Tính theo kg. Nấu bánh hoặc cháo loãng.' }), q: [1, 2] },
+    { w: 4, item: raw('Đậu xanh khô', 260, { unit: 'kg', description: 'Tính theo kg. Cần ngâm và nấu chín.' }), q: [1, 1] },
+    { w: 5, item: food('Dầu ăn (chai)', 10, { description: 'Chiên xào, thắp đèn tạm. Năng lượng cao.' }) },
+    { w: 6, item: food('Muối ăn (gói)', 0, { description: 'Gia vị và ướp muối bảo quản thức ăn.' }), q: [1, 2] },
+    { w: 5, item: food('Đường cát (túi nhỏ)', 14, { description: 'Năng lượng nhanh.' }) },
+    { w: 5, item: food('Nước mắm (chai nhỏ)', 3, { description: 'Gia vị, tăng hiệu quả bữa nấu.' }) },
+    { w: 4, item: food('Hạt nêm và gia vị khô', 2, { description: 'Làm bữa ăn đỡ nhạt.' }) },
+    { w: 4, item: fresh('Hành tỏi khô', 6, { canSpoil: false, description: 'Gia vị tươi lâu, nấu ăn thơm hơn.' }), q: [1, 2] },
+    { w: 4, item: food('Cá khô (bó)', 30, { description: 'Mặn, bảo quản rất lâu.', thirstReduce: -8 }), q: [1, 2] },
+    { w: 3, item: food('Đồ hộp tự chọn (nguyên seal)', 33, { isSealed: true }), q: [1, 3] },
+    { w: 3, item: food('Trà túi lọc (hộp)', 3, { description: 'Pha nước nóng giúp bớt căng thẳng.', sanityRestore: 3 }) },
+    { w: 3, item: mat('Bình gas mini', { description: 'Nhiên liệu cho bếp dã chiến.' }) },
+    { w: 2, item: mat('Bật lửa gas') },
   ],
   fridge: [
     { w: 6, item: raw('Thịt gà đông lạnh đã rã', 45), fresh: [18, 40] },
