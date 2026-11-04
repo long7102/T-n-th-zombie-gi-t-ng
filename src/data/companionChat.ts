@@ -166,6 +166,13 @@ const POOLS: Partial<Record<Intent, Pool>> = {
   },
 };
 
+// Đêm bên nhau: lãng mạn, giàu cảm xúc nhưng kín đáo, chuyển cảnh nhẹ nhàng (không miêu tả chi tiết).
+const ROMANTIC_NIGHTS = [
+  '(Họ ngồi sát bên nhau trước ngọn nến nhỏ, nói rất lâu về những điều chưa từng kể với ai. Khi ngọn nến sắp tàn, một nụ hôn dịu dàng đến rất tự nhiên, như thể cả hai đã chờ nó từ lâu. Ngoài kia gió vẫn rít qua những tòa nhà đổ nát, nhưng trong căn phòng nhỏ chỉ còn hơi ấm của hai người. Sáng hôm sau, cả hai thức dậy bên nhau, bình yên lạ lùng, như chưa từng có tận thế.)',
+  '(Tiếng mưa rơi đều trên mái tôn. Họ tựa vào nhau dưới tấm chăn cũ, bàn tay đan chặt, và lần đầu tiên sau bao ngày, không ai nghĩ tới bầy zombie ngoài kia. Một cái ôm kéo dài, một lời thì thầm, rồi bóng tối dịu dàng khép lại phần còn lại của đêm. Khi bình minh đến, lòng cả hai nhẹ đi nhiều.)',
+  '(Giữa căn phòng khóa kín và ánh sáng lập lòe của cây nến cuối cùng, họ nhìn nhau thật lâu rồi cùng bật cười, vì cả hai đều ngượng. Một nụ hôn, một cái siết tay, và đêm ấy thuộc về riêng hai người. Họ ngủ yên, lần đầu tiên không có ai phải thức canh.)',
+];
+
 const ASSIGN_REPLY: Record<'great' | 'ok' | 'poor', string[]> = {
   great: ['Việc đó đúng sở trường của {me}. {you} cứ yên tâm giao cho {me}.', '{me} từng làm việc tương tự rồi, để {me} lo.', 'Nhận! {me} sẽ làm thật cẩn thận.'],
   ok: ['{me} chưa giỏi lắm nhưng sẽ cố hết sức.', 'Được, {me} làm. Nếu có gì sai thì chỉ bảo thêm nhé.', 'Ừ, {me} nhận việc. Tối nay báo cáo lại.'],
@@ -247,7 +254,7 @@ export function offlineChat(req: ChatReq, rng: Rng = Math.random): ChatRes {
       res.reply = ready ? line(POOLS.intimate) : fill(pick(tr === 'low' ? POOLS.intimate!.low : POOLS.intimate!.mid, rng), c, pr);
       if (ready) {
         res.affectionChange = 8; res.moraleChange = 15; res.sanityChange = 12; res.trustChange = 5; res.mood = 'flirty';
-        res.reply += ' (Đêm đó hai người ở bên nhau, giữa cánh cửa khóa kín và ánh nến nhỏ. Sáng hôm sau, cả hai đều thấy lòng nhẹ đi nhiều.)';
+        res.reply += ` ${pick(ROMANTIC_NIGHTS, rng)}`;
         if (c.affection >= 92) res.intimacyLevel = 'soulmate';
       } else { res.affectionChange = tr === 'low' ? -4 : 0; res.mood = tr === 'low' ? 'upset' : 'shy'; res.trustChange = tr === 'low' ? -3 : 0; }
       break;
@@ -289,7 +296,7 @@ NGƯỜI CHƠI: giới tính ${p.gender}; ${p.nameKnown ? `tên ${p.name}` : 'CH
 
 LUẬT:
 1. Phản ứng đúng tính cách, độ tin cậy/thiện cảm: tin cậy thấp thì dè dặt, không dễ mở lòng; được quan tâm chân thành thì ấm lên dần.
-2. Quan hệ tình cảm/thân mật CHỈ giữa hai người trưởng thành KHÁC GIỚI. ${allow ? 'Hai người được phép phát triển tình cảm nếu đủ tin cậy và đồng thuận; cảnh thân mật phải kín đáo, chuyển cảnh nhẹ nhàng, không miêu tả chi tiết tình dục.' : 'Hai người KHÔNG được phép có quan hệ tình cảm/thân mật: từ chối khéo, nhẹ nhàng, giữ tình đồng đội.'}
+2. Quan hệ tình cảm/thân mật CHỈ giữa hai người trưởng thành KHÁC GIỚI. ${allow ? 'Hai người được phép phát triển tình cảm nếu đủ tin cậy và đồng thuận; cảnh thân mật phải lãng mạn, giàu cảm xúc (ánh nến, hơi ấm, nụ hôn, lời thì thầm) nhưng kín đáo, chuyển cảnh nhẹ nhàng sang sáng hôm sau, tuyệt đối không miêu tả chi tiết tình dục.' : 'Hai người KHÔNG được phép có quan hệ tình cảm/thân mật: từ chối khéo, nhẹ nhàng, giữ tình đồng đội.'}
 3. Nếu bị ép buộc, xúc phạm, nài nỉ khi chưa sẵn sàng: nhân vật từ chối thẳng, giảm tin cậy và thiện cảm.
 4. Chỉ nói tên thật khi tin cậy >= 35 và người chơi hỏi tên; nếu nói thì revealName = true. Nếu đã biết tên nhau mà người chơi chưa nói tên: có thể hỏi tên người chơi (asksPlayerName = true).
 5. Nếu người chơi giao việc (canh gác, nấu ăn, trinh sát, sửa chữa, y tế, kiếm đồ ăn, nghỉ ngơi), trả lời theo khả năng thật của nhân vật và đặt assignment tương ứng (guard|cook|scout|repair|medic|forage|rest).
