@@ -1,130 +1,288 @@
-import React from 'react';
-import { MapPin, Navigation, Clock, ShieldAlert, Sparkles, X, ChevronRight, AlertTriangle } from 'lucide-react';
-import { MapLocation } from '../types/game';
+import React, { useMemo, useState } from 'react';
+import { Navigation, Clock, ShieldAlert, X, Footprints, Eye, Lock } from 'lucide-react';
+import { WeatherType } from '../types/game';
+import { HOME_NODE_ID, KIND_ICON, NODE_BY_ID, REGION_LABEL, RING_RX, RING_Y_RATIO, WORLD_NODES, WorldNode, knownNodes, revealedNodes, shortestPath } from '../data/worldMap';
 import { sound } from '../utils/audio';
 
 interface DynamicMapModalProps {
-  locations: MapLocation[];
-  currentLocation: string;
-  onSelectTravel: (loc: MapLocation, lootStyle: 'quick' | 'thorough') => void;
+  visitedNodes: string[];
+  visitCounts: Record<string, number>;
+  weather: WeatherType;
+  stamina: number;
+  homeName: string;
+  onTravel: (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number) => void;
   onClose: () => void;
 }
 
+const dangerColor = (d: number) => (d <= 2 ? '#34d399' : d === 3 ? '#fbbf24' : d === 4 ? '#fb923c' : '#f87171');
+const RING: { r: number; label: string }[] = [
+  { r: RING_RX.near, label: 'VÙNG GẦN' },
+  { r: RING_RX.mid, label: 'VÙNG TRUNG' },
+  { r: RING_RX.far, label: 'VÙNG XA' },
+];
+
 export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
-  locations,
-  currentLocation,
-  onSelectTravel,
+  visitedNodes,
+  visitCounts,
+  weather,
+  stamina,
+  homeName,
+  onTravel,
   onClose,
 }) => {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const visible = useMemo(() => revealedNodes(visitedNodes), [visitedNodes]);
+  const known = useMemo(() => knownNodes(visitedNodes), [visitedNodes]);
+  const home = NODE_BY_ID[HOME_NODE_ID];
+
+  const selected = selectedId ? NODE_BY_ID[selectedId] : null;
+  const path = useMemo(() => (selected ? shortestPath(HOME_NODE_ID, selected.id) : []), [selected]);
+  const hops = Math.max(0, path.length - 1);
+  const pathEdges = new Set(path.slice(1).map((id, i) => [path[i], id].sort().join('|')));
+
+  const rainy = weather === 'heavy_rain' || weather === 'freezing_cold';
+  const staminaCost = (style: 'quick' | 'thorough') => {
+    const base = 6 * hops + (style === 'thorough' ? 9 : 3);
+    return rainy ? Math.round(base * 1.2) : base;
+  };
+  const visits = selected ? visitCounts[selected.id] || 0 : 0;
+
+  const edges: [WorldNode, WorldNode][] = [];
+  WORLD_NODES.forEach((a) => {
+    a.connections.forEach((cid) => {
+      if (a.id < cid) edges.push([a, NODE_BY_ID[cid]]);
+    });
+  });
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm select-none">
-      <div className="w-full max-w-3xl bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 backdrop-blur-sm select-none sm:p-4">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-neutral-800 bg-neutral-950/80">
+        <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-950/80 p-3 sm:p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-sky-950/60 text-sky-400 rounded-lg border border-sky-800/60">
-              <Navigation className="w-5 h-5" />
+            <div className="rounded-lg border border-sky-800/60 bg-sky-950/60 p-2 text-sky-400">
+              <Navigation className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white tracking-wide">
-                BẢN ĐỒ THĂM DÒ TÀI NGUYÊN (DYNAMIC MAP)
-              </h3>
-              <p className="text-xs text-neutral-400">
-                Các địa điểm phù hợp thực tế vừa mở khóa do ba lô của bạn đang thiếu hụt nguyên liệu
+              <h3 className="text-base font-bold tracking-wide text-white sm:text-lg">BẢN ĐỒ KHU VỰC</h3>
+              <p className="text-[11px] text-neutral-400 sm:text-xs">
+                Chọn một điểm để xem lộ trình. Điểm xa hơn tốn nhiều chặng, nhiều thể lực nhưng vật tư giá trị hơn.
               </p>
             </div>
           </div>
-
           <button
             onClick={onClose}
-            className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
+            className="cursor-pointer rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
+            aria-label="Đóng bản đồ"
           >
-            <X className="w-5 h-5" />
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Current Location Bar */}
-        <div className="px-5 py-2.5 bg-neutral-950/50 border-b border-neutral-800 flex items-center justify-between text-xs font-mono">
-          <span className="text-neutral-400">Vị trí hiện tại:</span>
-          <span className="text-amber-400 font-semibold">{currentLocation}</span>
-        </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row">
+          {/* Map canvas */}
+          <div className="relative flex-1 bg-neutral-950 p-2 sm:p-3">
+            <svg viewBox="0 0 100 70" className="h-auto w-full rounded-lg border border-neutral-800 bg-[#0b0f0e]" role="img" aria-label="Sơ đồ bản đồ khu vực">
+              <defs>
+                <pattern id="grid" width="5" height="5" patternUnits="userSpaceOnUse">
+                  <path d="M 5 0 L 0 0 0 5" fill="none" stroke="#1b2422" strokeWidth="0.15" />
+                </pattern>
+                <radialGradient id="fog" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#0b0f0e" stopOpacity="0" />
+                  <stop offset="100%" stopColor="#000" stopOpacity="0.55" />
+                </radialGradient>
+              </defs>
+              <rect width="100" height="70" fill="url(#grid)" />
 
-        {/* Location List */}
-        <div className="p-5 overflow-y-auto flex-1 space-y-4">
-          {locations.length === 0 ? (
-            <div className="text-center py-12 text-neutral-500 text-xs">
-              Hiện tại bạn chưa phát hiện thêm địa điểm khả nghi nào cần thiết. Khi thiếu băng gạc, thuốc men hoặc sắt phế liệu, bản đồ sẽ lập tức định vị!
+              {/* Vùng khoảng cách quanh căn cứ */}
+              {RING.map((rg) => {
+                // Nhãn đặt ở góc 60° (dưới-phải) nơi không có điểm nào, để không đè lên nhãn địa điểm
+                const lx = home.x + rg.r * Math.cos(Math.PI / 3);
+                const ly = home.y + rg.r * RING_Y_RATIO * Math.sin(Math.PI / 3);
+                return (
+                  <g key={rg.r}>
+                    <ellipse cx={home.x} cy={home.y} rx={rg.r} ry={rg.r * RING_Y_RATIO} fill="none" stroke="#2a3a36" strokeWidth="0.25" strokeDasharray="1.2 1.2" />
+                    <text x={lx} y={ly} textAnchor="middle" fontSize="1.7" fill="#5b756b" letterSpacing="0.2">
+                      {rg.label}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Đường nối */}
+              {edges.map(([a, b]) => {
+                const bothSeen = visible.has(a.id) && visible.has(b.id);
+                if (!bothSeen) return null;
+                const bothKnown = known.has(a.id) && known.has(b.id);
+                const onPath = pathEdges.has([a.id, b.id].sort().join('|'));
+                return (
+                  <line
+                    key={`${a.id}-${b.id}`}
+                    x1={a.x}
+                    y1={a.y}
+                    x2={b.x}
+                    y2={b.y}
+                    stroke={onPath ? '#38bdf8' : bothKnown ? '#44574f' : '#26302d'}
+                    strokeWidth={onPath ? 0.9 : 0.45}
+                    strokeDasharray={bothKnown ? undefined : '1 1'}
+                    strokeLinecap="round"
+                  />
+                );
+              })}
+
+              {/* Các điểm */}
+              {WORLD_NODES.map((n) => {
+                if (!visible.has(n.id)) return null;
+                const isKnown = known.has(n.id);
+                const isHome = n.id === HOME_NODE_ID;
+                const isSel = n.id === selectedId;
+                const wasVisited = visitedNodes.includes(n.id);
+                const color = isHome ? '#38bdf8' : isKnown ? dangerColor(n.danger) : '#52605b';
+                return (
+                  <g
+                    key={n.id}
+                    onClick={() => {
+                      if (isHome) return;
+                      sound.playClick();
+                      setSelectedId(n.id);
+                    }}
+                    className={isHome ? '' : 'cursor-pointer'}
+                    role={isHome ? undefined : 'button'}
+                    aria-label={isKnown ? n.name : 'Địa điểm chưa rõ'}
+                  >
+                    {isSel && <circle cx={n.x} cy={n.y} r="4.6" fill="none" stroke="#38bdf8" strokeWidth="0.4" />}
+                    <circle cx={n.x} cy={n.y} r={isHome ? 3.6 : 3} fill="#0f1513" stroke={color} strokeWidth={isHome ? 0.7 : 0.5} />
+                    <text x={n.x} y={n.y + 1.1} textAnchor="middle" fontSize="3" style={{ pointerEvents: 'none' }}>
+                      {isKnown ? KIND_ICON[n.kind] : '❔'}
+                    </text>
+                    {wasVisited && (
+                      <circle cx={n.x + 2.6} cy={n.y - 2.6} r="1" fill="#34d399" stroke="#0f1513" strokeWidth="0.25" />
+                    )}
+                    <text x={n.x} y={n.y + (!isHome && n.y < home.y ? -4.6 : 6)} textAnchor="middle" fontSize="2.2" fill={isKnown ? '#cbd5d0' : '#64706b'} style={{ pointerEvents: 'none' }}>
+                      {isKnown ? (isHome ? homeName.slice(0, 22) : n.name.split(' - ')[0].slice(0, 22)) : 'Chưa rõ'}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Vị trí của bạn: vòng tròn xung nhịp chậm */}
+              <g style={{ pointerEvents: 'none' }}>
+                <circle cx={home.x} cy={home.y} r="5.2" fill="none" stroke="#38bdf8" strokeWidth="0.35" opacity="0.7">
+                  <animate attributeName="r" values="4.4;6.6;4.4" dur="3.2s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.7;0.1;0.7" dur="3.2s" repeatCount="indefinite" />
+                </circle>
+                <text x={home.x} y={home.y + 8.6} textAnchor="middle" fontSize="1.9" fontWeight="700" fill="#7dd3fc">
+                  ▲ BẠN Ở ĐÂY
+                </text>
+              </g>
+              <rect width="100" height="70" fill="url(#fog)" style={{ pointerEvents: 'none' }} />
+            </svg>
+
+            {/* Chú giải */}
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[10px] font-mono text-neutral-400">
+              <span className="flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full bg-sky-400" /> Căn cứ</span>
+              <span className="flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full" style={{ background: '#34d399' }} /> Nguy hiểm thấp</span>
+              <span className="flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full" style={{ background: '#fbbf24' }} /> Trung bình</span>
+              <span className="flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-full" style={{ background: '#f87171' }} /> Rất nguy hiểm</span>
+              <span className="flex items-center gap-1"><Eye className="h-3 w-3" /> Ghé điểm nào sẽ mở thêm điểm kề nó</span>
             </div>
-          ) : (
-            locations.map((loc) => {
-              return (
-                <div
-                  key={loc.id}
-                  className="p-4 bg-neutral-950/70 border border-neutral-800 hover:border-neutral-700 rounded-lg space-y-3 transition-colors"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-800/80 pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-rose-500 shrink-0" />
-                      <h4 className="font-bold text-sm text-white">{loc.location_name}</h4>
-                    </div>
+          </div>
 
-                    <div className="flex items-center gap-3 text-xs font-mono">
-                      <span className="text-neutral-400 flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-sky-400" />
-                        <span>{loc.distance_time}</span>
-                      </span>
-                      <span className="text-red-400 flex items-center gap-1">
-                        <ShieldAlert className="w-3.5 h-3.5" />
-                        <span>Nguy hiểm Cấp {loc.danger_level}</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Potential Resources */}
-                  <div className="space-y-1">
-                    <div className="text-[11px] font-mono text-neutral-400 uppercase tracking-wider">
-                      Vật tư tiềm năng tại đây:
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {loc.potential_resources.map((res, i) => (
-                        <span
-                          key={i}
-                          className="text-xs bg-neutral-900 border border-neutral-800 text-neutral-200 px-2 py-0.5 rounded font-mono"
-                        >
-                          ✦ {res}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Action Choices: Loot Nhanh vs Loot Kỹ */}
-                  <div className="pt-2 border-t border-neutral-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      onClick={() => {
-                        sound.playClick();
-                        onSelectTravel(loc, 'quick');
-                      }}
-                      className="py-2 px-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded text-xs font-medium transition-colors cursor-pointer text-left flex flex-col"
-                    >
-                      <span className="font-semibold text-white">⚡ Di Chuyển & Loot Nhanh</span>
-                      <span className="text-[10px] text-neutral-400 mt-0.5">Ít tiếng động, nhặt nhanh đồ cơ bản</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        sound.playClick();
-                        onSelectTravel(loc, 'thorough');
-                      }}
-                      className="py-2 px-3 bg-red-950/60 hover:bg-red-900 text-red-200 border border-red-800/80 rounded text-xs font-medium transition-colors cursor-pointer text-left flex flex-col"
-                    >
-                      <span className="font-semibold text-red-300">🔍 Di Chuyển & Phá Khóa / Loot Kỹ</span>
-                      <span className="text-[10px] text-red-400 mt-0.5">Tốn thời gian, rủi ro cao, cơ hội mở súng ống/đồ hiếm</span>
-                    </button>
-                  </div>
+          {/* Detail panel */}
+          <aside className="w-full shrink-0 border-t border-neutral-800 bg-neutral-900 p-4 lg:w-80 lg:border-l lg:border-t-0">
+            {!selected ? (
+              <div className="py-8 text-center text-xs leading-relaxed text-neutral-500">
+                Chạm vào một điểm trên bản đồ để xem lộ trình, độ nguy hiểm và vật tư tiềm năng.
+                <div className="mt-3 text-[11px] text-neutral-600">
+                  Thể lực hiện tại: <span className="text-emerald-400">{stamina}</span>
+                  {rainy && <div className="text-amber-400">Thời tiết xấu: mỗi chặng tốn thêm 20% thể lực.</div>}
                 </div>
-              );
-            })
-          )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-sky-400">{REGION_LABEL[selected.region]}</div>
+                  <h4 className="text-sm font-bold text-white">
+                    {known.has(selected.id) ? `${KIND_ICON[selected.kind]} ${selected.name}` : '❔ Địa điểm chưa rõ'}
+                  </h4>
+                </div>
+
+                {!known.has(selected.id) ? (
+                  <div className="flex items-start gap-2 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3 text-xs text-neutral-400">
+                    <Lock className="mt-0.5 h-4 w-4 shrink-0 text-neutral-500" />
+                    <span>
+                      Bạn mới chỉ thấy tín hiệu mờ ở hướng này. Hãy ghé một điểm kề nó (
+                      {selected.connections
+                        .filter((c) => known.has(c) && c !== HOME_NODE_ID)
+                        .map((c) => NODE_BY_ID[c].name.split(' - ')[0])
+                        .join(', ') || 'điểm gần hơn'}
+                      ) để khám phá.
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-xs leading-relaxed text-neutral-300">{selected.description}</p>
+
+                    <div className="grid grid-cols-3 gap-2 text-center font-mono text-[11px]">
+                      <div className="rounded border border-neutral-800 bg-neutral-950/70 p-2">
+                        <Footprints className="mx-auto mb-0.5 h-3.5 w-3.5 text-sky-400" />
+                        {hops} chặng
+                      </div>
+                      <div className="rounded border border-neutral-800 bg-neutral-950/70 p-2">
+                        <ShieldAlert className="mx-auto mb-0.5 h-3.5 w-3.5" style={{ color: dangerColor(selected.danger) }} />
+                        Cấp {selected.danger}
+                      </div>
+                      <div className="rounded border border-neutral-800 bg-neutral-950/70 p-2">
+                        <Clock className="mx-auto mb-0.5 h-3.5 w-3.5 text-amber-400" />
+                        {visits === 0 ? 'Chưa ghé' : `Đã ghé ${visits}`}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="mb-1 text-[10px] font-mono uppercase tracking-wider text-neutral-400">Vật tư tiềm năng</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selected.resources.map((r) => (
+                          <span key={r} className="rounded border border-neutral-800 bg-neutral-950 px-2 py-0.5 font-mono text-[11px] text-neutral-200">
+                            ✦ {r}
+                          </span>
+                        ))}
+                      </div>
+                      {visits > 0 && <div className="mt-1 text-[10px] text-amber-400">Đã ghé {visits} lần nên vật tư còn ít hơn.</div>}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 border-t border-neutral-800 pt-3">
+                      <button
+                        disabled={stamina < staminaCost('quick')}
+                        onClick={() => {
+                          sound.playClick();
+                          onTravel(selected, 'quick', hops);
+                        }}
+                        className="flex cursor-pointer flex-col rounded bg-neutral-800 px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <span className="font-semibold text-white">⚡ Lục soát nhanh</span>
+                        <span className="text-[10px] text-neutral-400">Ít tiếng động · tốn ~{staminaCost('quick')} thể lực</span>
+                      </button>
+                      <button
+                        disabled={stamina < staminaCost('thorough')}
+                        onClick={() => {
+                          sound.playClick();
+                          onTravel(selected, 'thorough', hops);
+                        }}
+                        className="flex cursor-pointer flex-col rounded border border-red-800/80 bg-red-950/60 px-3 py-2 text-left text-xs transition-colors hover:bg-red-900 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <span className="font-semibold text-red-300">🔍 Lục soát kỹ / phá khóa</span>
+                        <span className="text-[10px] text-red-400">Cơ hội đồ hiếm, rủi ro cao · tốn ~{staminaCost('thorough')} thể lực</span>
+                      </button>
+                      {stamina < staminaCost('thorough') && (
+                        <div className="text-[10px] text-amber-400">Thể lực không đủ cho chuyến này, hãy nghỉ ngơi trước.</div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </aside>
         </div>
       </div>
     </div>

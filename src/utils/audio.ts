@@ -24,6 +24,9 @@ interface AmbientLayers {
 
   heatGain: GainNode;
   heatOsc: OscillatorNode;
+  heatAm: GainNode;
+  heatLfo: OscillatorNode;
+  heatLfoGain: GainNode;
 }
 
 class SoundEngine {
@@ -40,6 +43,8 @@ class SoundEngine {
   private currentWeather: WeatherType = 'dense_fog';
   private currentDangerLevel: number = 2;
   private screamsTimeout: number | null = null;
+  private thunderTimeout: number | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
 
   private init() {
     if (!this.ctx) {
@@ -50,7 +55,15 @@ class SoundEngine {
 
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.setValueAtTime(this.muted ? 0 : this.volume, this.ctx.currentTime);
-      this.masterGain.connect(this.ctx.destination);
+      // Bộ nén động: tránh vỡ tiếng khi súng, sấm và tiếng gió chồng lên nhau
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compressor.threshold.setValueAtTime(-20, this.ctx.currentTime);
+      this.compressor.knee.setValueAtTime(24, this.ctx.currentTime);
+      this.compressor.ratio.setValueAtTime(6, this.ctx.currentTime);
+      this.compressor.attack.setValueAtTime(0.004, this.ctx.currentTime);
+      this.compressor.release.setValueAtTime(0.25, this.ctx.currentTime);
+      this.masterGain.connect(this.compressor);
+      this.compressor.connect(this.ctx.destination);
 
       this.ambientGain = this.ctx.createGain();
       this.ambientGain.gain.setValueAtTime(this.muted ? 0 : 0.3 * this.volume, this.ctx.currentTime);
@@ -231,9 +244,22 @@ class SoundEngine {
       const initialHeatVol = weather === 'heatwave' ? 0.05 : 0.0001;
       heatGain.gain.setValueAtTime(initialHeatVol, now);
 
-      heatOsc.connect(heatGain);
+      // Tiếng ve rền theo nhịp (điều biến biên độ ~7Hz, tần số lệch nhẹ) thay vì một âm sine đều đặn
+      const heatAm = this.ctx.createGain();
+      heatAm.gain.setValueAtTime(0.5, now);
+      const heatLfo = this.ctx.createOscillator();
+      const heatLfoGain = this.ctx.createGain();
+      heatLfo.type = 'square';
+      heatLfo.frequency.setValueAtTime(7.3, now);
+      heatLfoGain.gain.setValueAtTime(0.5, now);
+      heatLfo.connect(heatLfoGain);
+      heatLfoGain.connect(heatAm.gain);
+      heatOsc.frequency.setValueAtTime(3100, now);
+      heatOsc.connect(heatAm);
+      heatAm.connect(heatGain);
       heatGain.connect(this.ambientGain);
       heatOsc.start(now);
+      heatLfo.start(now);
 
       this.ambientLayers = {
         droneGain,
@@ -251,10 +277,14 @@ class SoundEngine {
         rainSource,
         heatGain,
         heatOsc,
+        heatAm,
+        heatLfo,
+        heatLfoGain,
       };
 
       this.ambientRunning = true;
       this.scheduleNextDistantWail();
+      this.syncWeatherEvents(weather);
     } catch {
       // Audio context might await user gesture
     }
@@ -289,6 +319,11 @@ class SoundEngine {
       const targetWindVol = this.getWindVolumeForWeather(weather, dangerLevel);
       this.ambientLayers.windGain.gain.setTargetAtTime(targetWindVol, now, rampTime);
 
+      // 2b. Giọng gió đổi theo thời tiết: rét thì rít cao, sương mù thì trầm
+      const windPitch = weather === 'freezing_cold' ? 950 : weather === 'dense_fog' ? 380 : weather === 'heavy_rain' ? 700 : 550;
+      this.ambientLayers.windFilter.frequency.setTargetAtTime(windPitch, now, rampTime);
+      this.syncWeatherEvents(weather);
+
       // 3. Rain layer volume
       const targetRainVol = weather === 'heavy_rain' ? 0.28 : 0.0001;
       this.ambientLayers.rainGain.gain.setTargetAtTime(targetRainVol, now, rampTime);
@@ -301,6 +336,116 @@ class SoundEngine {
       if (dangerLevel >= 4) {
         this.scheduleNextDistantWail(true);
       }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Sự kiện âm thanh ngẫu nhiên theo thời tiết: mưa bão thì thỉnh thoảng có sấm rền.
+  private syncWeatherEvents(weather: WeatherType) {
+    if (this.thunderTimeout !== null) {
+      clearTimeout(this.thunderTimeout);
+      this.thunderTimeout = null;
+    }
+    // Sấm do AtmosphereCanvas kích hoạt để chớp sáng và tiếng sấm luôn đồng bộ (chớp trước, sấm rền sau).
+    void weather;
+  }
+
+  // Dò sóng radio: tạp âm băng hẹp, hai nốt dò tần và vài cụm nhiễu ngắt quãng.
+  public playRadioStatic() {
+    try {
+      this.init();
+      if (!this.ctx || !this.masterGain || this.muted) return;
+      const now = this.ctx.currentTime;
+      const dur = 1.6;
+      const buf = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) {
+        const t = i / this.ctx.sampleRate;
+        // Tín hiệu bị nuốt theo từng cụm (gating) để tạo cảm giác đứt quãng
+        const gate = Math.sin(t * 17) > -0.2 ? 1 : 0.15;
+        d[i] = (Math.random() * 2 - 1) * gate;
+      }
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(2200, now);
+      bp.frequency.linearRampToValueAtTime(1500, now + dur);
+      bp.Q.setValueAtTime(0.9, now);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(0.14, now + 0.08);
+      g.gain.setValueAtTime(0.14, now + dur - 0.4);
+      g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this.masterGain);
+      src.start(now);
+
+      [620, 940].forEach((f, i) => {
+        const o = this.ctx!.createOscillator();
+        const og = this.ctx!.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(f, now + 0.1 + i * 0.12);
+        og.gain.setValueAtTime(0.0001, now + 0.1 + i * 0.12);
+        og.gain.linearRampToValueAtTime(0.05, now + 0.12 + i * 0.12);
+        og.gain.exponentialRampToValueAtTime(0.0005, now + 0.22 + i * 0.12);
+        o.connect(og);
+        og.connect(this.masterGain!);
+        o.start(now + 0.1 + i * 0.12);
+        o.stop(now + 0.3 + i * 0.12);
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  // Tiếng giấy loạt xoạt khi mở bản đồ
+  public playMapOpen() {
+    try {
+      this.init();
+      if (!this.ctx || !this.masterGain || this.muted) return;
+      const now = this.ctx.currentTime;
+      const len = Math.floor(this.ctx.sampleRate * 0.35);
+      const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.sin((i / len) * Math.PI);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.setValueAtTime(1800, now);
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.12, now);
+      src.connect(hp);
+      hp.connect(g);
+      g.connect(this.masterGain);
+      src.start(now);
+    } catch {
+      // ignore
+    }
+  }
+
+  // Âm báo cho cột mốc cốt truyện: hai nốt trầm đi xuống, báo hiệu một bước ngoặt
+  public playStinger() {
+    try {
+      this.init();
+      if (!this.ctx || !this.masterGain || this.muted) return;
+      const now = this.ctx.currentTime;
+      [196, 146.8].forEach((f, i) => {
+        const o = this.ctx!.createOscillator();
+        const g = this.ctx!.createGain();
+        o.type = 'triangle';
+        o.frequency.setValueAtTime(f, now + i * 0.45);
+        g.gain.setValueAtTime(0.0001, now + i * 0.45);
+        g.gain.linearRampToValueAtTime(0.22, now + i * 0.45 + 0.05);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.45 + 1.1);
+        o.connect(g);
+        g.connect(this.masterGain!);
+        o.start(now + i * 0.45);
+        o.stop(now + i * 0.45 + 1.2);
+      });
     } catch {
       // ignore
     }
@@ -403,6 +548,10 @@ class SoundEngine {
 
   // Stop the ambient soundscape
   public stopAmbientSoundscape() {
+    if (this.thunderTimeout !== null) {
+      clearTimeout(this.thunderTimeout);
+      this.thunderTimeout = null;
+    }
     if (this.screamsTimeout !== null) {
       clearTimeout(this.screamsTimeout);
       this.screamsTimeout = null;
@@ -426,6 +575,7 @@ class SoundEngine {
           this.ambientLayers?.windLfo.stop();
           this.ambientLayers?.rainSource.stop();
           this.ambientLayers?.heatOsc.stop();
+          this.ambientLayers?.heatLfo.stop();
         } catch {}
         this.ambientLayers = null;
         this.ambientRunning = false;
@@ -741,6 +891,12 @@ class SoundEngine {
       case 'loot':
       case 'craft':
         this.playLoot();
+        break;
+      case 'radio':
+        this.playRadioStatic();
+        break;
+      case 'stinger':
+        this.playStinger();
         break;
       case 'heartbeat':
         this.startHeartbeat(125);
