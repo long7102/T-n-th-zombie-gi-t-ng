@@ -30,7 +30,7 @@ export interface RandomEventChoice {
 
 export interface RandomEvent {
   id: string;
-  category: 'new_survivor' | 'bandit_ambush' | 'environmental_zombie' | 'extreme_weather';
+  category: 'new_survivor' | 'bandit_ambush' | 'environmental_zombie' | 'extreme_weather' | 'horde' | 'supply_drop';
   title: string;
   description: string;
   dangerLevel: number;
@@ -438,6 +438,84 @@ export const RANDOM_EVENTS: RandomEvent[] = [
           rarity: 'rare',
         }],
         outcomeNarrative: 'Bạn dầm mình dưới làn nước lạnh buốt cạy tung cửa sau xe cứu thương. Bàn tay run rẩy chạm vào chiếc hộp cứu thương màu cam còn nguyên niêm phong! Món đồ y tế vô giá này có thể cứu sống bạn trong những giờ khắc đen tối nhất.',
+      },
+    ],
+  },
+
+  // ================= 5. BẦY ZOMBIE TRÀN QUA (CÓ BÁO TRƯỚC QUA RADIO) =================
+  {
+    id: 'event_horde_night',
+    category: 'horde',
+    title: 'Bầy Thây Ma Kéo Qua Khu Phố',
+    description: 'Mặt đường rung lên từng nhịp. Từ đầu phố, hàng trăm bóng đen lê bước chen chúc nhau, tiếng rên khô khốc nối thành một âm thanh ù ù không dứt. Chúng chưa biết bạn ở đây, nhưng chỉ cần một tiếng động nhỏ là cả bầy sẽ đổ về phía này.',
+    dangerLevel: 4,
+    isEmergency: true,
+    emergencySeconds: 15,
+    soundCue: 'heartbeat',
+    choices: [
+      {
+        id: 'horde_hold_silent',
+        text: 'Tắt hết ánh sáng, chèn kín cửa và nín thở chờ bầy đi qua',
+        tacticalNote: 'Không tốn tài nguyên, nhưng căng thẳng tâm lý kéo dài và thể lực hao mòn vì không dám cử động.',
+        statImpact: { sanity: -10, stamina: -10 },
+        outcomeNarrative: 'Bạn ép sát lưng vào tường, bịt miệng đồng đội. Tiếng lê bước kéo dài gần một tiếng đồng hồ, có lúc một bàn tay thối rữa cào lên cánh cửa rồi lại trượt đi. Khi tiếng rên xa dần, áo bạn đã ướt đẫm mồ hôi lạnh nhưng không ai bị phát hiện.',
+      },
+      {
+        id: 'horde_lure_with_noise',
+        text: 'Ném chiếc đèn pin vỡ sang con phố bên kia để dẫn bầy đi hướng khác',
+        tacticalNote: 'Lợi dụng thính giác nhạy bén của zombie, nhưng mất món đồ gây tiếng động và phải chạy nhanh.',
+        statImpact: { stamina: -20, sanity: -3 },
+        itemsLost: [{ name: 'Đèn pin', quantity: 1 }],
+        outcomeNarrative: 'Bạn ném chiếc đèn pin xuống con phố đối diện, nó vỡ toang kèm tiếng loảng xoảng. Cả bầy xoay đầu đồng loạt rồi ùa theo âm thanh. Bạn bò dọc bờ tường sang hướng ngược lại, tim đập như muốn vỡ ra, và thoát khỏi vòng nguy hiểm.',
+      },
+      {
+        id: 'horde_climb_rooftop',
+        text: 'Leo lên sân thượng, rút thang sắt lên và quan sát bầy đi qua từ trên cao',
+        tacticalNote: 'An toàn nếu còn sức, nhưng cú leo tốn nhiều thể lực và bạn sẽ không kịp cất đồ ở tầng dưới.',
+        statImpact: { stamina: -25, hunger: +4 },
+        outcomeNarrative: 'Bạn leo vội lên sân thượng, kéo thang sắt lên sau lưng. Từ trên cao, bạn thấy cả dòng người chết đặc quánh chảy qua đại lộ như một con sông tối. Bạn ghi nhớ hướng chúng đi, rồi kiệt sức ngồi bệt xuống trong gió lạnh.',
+      },
+    ],
+  },
+
+  // ================= 6. THÙNG TIẾP TẾ RƠI (CÓ BÁO TRƯỚC QUA RADIO) =================
+  {
+    id: 'event_supply_drop',
+    category: 'supply_drop',
+    title: 'Thùng Tiếp Tế Rơi Trên Bãi Đất Trống',
+    description: 'Một chiếc dù trắng bạc phơ phất rơi chậm xuống bãi đỗ xe phía sau chợ, kéo theo thùng nhựa quân dụng đập xuống nền đất khô khốc. Tiếng động đủ lớn để mấy bóng người lảo đảo ngoài kia bắt đầu quay đầu. Có thể còn người khác cũng đã nghe thấy tiếng thùng rơi.',
+    dangerLevel: 3,
+    isEmergency: false,
+    soundCue: 'loot',
+    choices: [
+      {
+        id: 'drop_rush_crate',
+        text: 'Lao ra ngay, vác thùng chạy về trước khi đám zombie kịp tới',
+        tacticalNote: 'Lấy được cả thùng nhưng ồn ào, dễ bị thương và thu hút thêm quái vật.',
+        statImpact: { hp: -8, stamina: -25 },
+        itemsGained: [
+          { id: 'drop_ration_pack', name: 'Lương khô quân đội', category: 'food', quantity: 3, hungerReduce: 40, isSealed: true, canSpoil: false, description: 'Khẩu phần quân đội đóng gói chân không.', rarity: 'uncommon' },
+          { id: 'drop_water_ration', name: 'Nước khoáng đóng chai', category: 'food', quantity: 2, thirstReduce: 45, canSpoil: false, description: 'Nước đóng chai niêm phong từ thùng tiếp tế.', rarity: 'uncommon' },
+          { id: 'drop_trauma_gauze', name: 'Băng gạc tiệt trùng y tế', category: 'medical', quantity: 2, healAmount: 20, infectionReduce: 15, description: 'Gạc vô trùng dã chiến.', rarity: 'uncommon' },
+        ],
+        outcomeNarrative: 'Bạn lao qua bãi đỗ xe, ôm trọn thùng nhựa nặng trịch rồi quay đầu chạy. Hai con zombie vồ trượt gấu áo, một con cào rách cánh tay bạn trước khi bạn đóng sập cánh cửa sắt lại. Bên trong thùng là lương khô, nước và băng gạc nguyên seal. Cái giá là vết cào rát bỏng và đôi chân run rẩy.',
+      },
+      {
+        id: 'drop_wait_and_watch',
+        text: 'Núp quan sát vài phút cho đám zombie tản đi rồi mới lấy từng món nhẹ',
+        tacticalNote: 'Ít rủi ro nhưng chỉ lấy được một phần, có thể có người khác nhanh tay hơn.',
+        statImpact: { stamina: -10 },
+        itemsGained: [
+          { id: 'drop_ration_pack', name: 'Lương khô quân đội', category: 'food', quantity: 2, hungerReduce: 40, isSealed: true, canSpoil: false, description: 'Khẩu phần quân đội đóng gói chân không.', rarity: 'uncommon' },
+        ],
+        outcomeNarrative: 'Bạn núp sau xe tải gỉ sét, đếm từng nhịp thở. Khi đám zombie bị tiếng chó hoang dụ đi, bạn bò ra mở nắp thùng, chỉ kịp vơ vài gói lương khô rồi rút lui. Phần còn lại đã bị ai đó khác chuyển đi từ lúc nào.',
+      },
+      {
+        id: 'drop_set_trap_ambush',
+        text: 'Bỏ qua thùng tiếp tế, ở trên cao canh chừng xem ai sẽ đến lấy rồi tính tiếp',
+        tacticalNote: 'Không mất gì, biết thêm về những người xung quanh nhưng bỏ lỡ cơ hội.',
+        statImpact: { sanity: -4 },
+        outcomeNarrative: 'Bạn nằm yên trên ban công, nhìn qua khe lan can. Một nhóm ba người mặt bịt kín xuất hiện, mở thùng, nhìn quanh đầy cảnh giác rồi lặng lẽ khiêng đi. Không ai biết bạn ở đó. Bạn nhớ được lộ trình của họ nhưng bụng vẫn rỗng.',
       },
     ],
   },

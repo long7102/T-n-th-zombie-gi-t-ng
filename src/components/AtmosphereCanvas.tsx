@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { BackgroundEffectType } from '../types/game';
+import { sound } from '../utils/audio';
 
 interface AtmosphereCanvasProps {
   weather: string;
@@ -40,10 +41,13 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
     window.addEventListener('resize', handleResize);
 
     // Weather flags
+    const isHeavyRain = weather === 'heavy_rain';
     const isRain = backgroundEffect === 'rain_light' || backgroundEffect === 'thunder_soft' || weather.includes('rain');
-    const isThunder = backgroundEffect === 'thunder_soft';
+    const isThunder = backgroundEffect === 'thunder_soft' || isHeavyRain;
+    const isOvercast = backgroundEffect === 'overcast' || weather === 'clear';
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
     const isHeat = backgroundEffect === 'sunny_harsh' || weather.includes('heatwave');
-    const isSnow = weather.includes('cold') || weather.includes('freezing');
+    const isSnow = weather.includes('cold') || weather.includes('freezing') || backgroundEffect === 'frost_wind';
     const isFog = backgroundEffect === 'fog_dense' || weather.includes('fog');
     const isNight = backgroundEffect === 'night_dark' || weather.includes('night');
     const isBlackout = cityPowerBlackout || (day || 1) >= 10;
@@ -51,14 +55,14 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
     // 1. Rain Particles
     const rainDrops: { x: number; y: number; length: number; speedY: number; speedX: number; alpha: number }[] = [];
     if (isRain) {
-      const dropCount = backgroundEffect === 'thunder_soft' ? 70 : 45;
+      const dropCount = isHeavyRain ? 110 : backgroundEffect === 'thunder_soft' ? 70 : 45;
       for (let i = 0; i < dropCount; i++) {
         rainDrops.push({
           x: Math.random() * width,
           y: Math.random() * height,
           length: 12 + Math.random() * 16,
-          speedY: 10 + Math.random() * 6,
-          speedX: -2 - Math.random() * 1.5,
+          speedY: (isHeavyRain ? 14 : 10) + Math.random() * 6,
+          speedX: (isHeavyRain ? -4 : -2) - Math.random() * 1.5,
           alpha: 0.2 + Math.random() * 0.35,
         });
       }
@@ -121,6 +125,21 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
     ];
     let fogOffset = 0;
 
+    // 5b. Luồng gió lạnh (vệt ngang mờ) và sóng nhiệt bốc lên mặt đất
+    const windStreaks = Array.from({ length: isSnow ? 14 : 0 }, () => ({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      len: 80 + Math.random() * 160,
+      speed: 5 + Math.random() * 5,
+      alpha: 0.04 + Math.random() * 0.06,
+    }));
+    const cloudBanks = Array.from({ length: isOvercast ? 5 : 0 }, (_, i) => ({
+      x: (i / 5) * width,
+      y: height * (0.12 + Math.random() * 0.3),
+      w: 320 + Math.random() * 260,
+      speed: 0.12 + Math.random() * 0.12,
+    }));
+
     // 6. Thunder Ambient Illumination
     let thunderAlpha = 0;
     let nextThunderTime = Date.now() + 5000 + Math.random() * 8000;
@@ -135,6 +154,8 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
       if (isThunder) {
         if (Date.now() > nextThunderTime) {
           thunderAlpha = 0.22; // Gentle, non-blinding atmospheric sheet glow
+          // Chớp trước, sấm rền sau 0.5-1.7 giây như ngoài đời thật
+          window.setTimeout(() => sound.playThunder(), 500 + Math.random() * 1200);
           nextThunderTime = Date.now() + 6000 + Math.random() * 9000;
         }
         if (thunderAlpha > 0) {
@@ -170,6 +191,11 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
         bgGrad.addColorStop(0, '#090d16');
         bgGrad.addColorStop(0.6, '#060910');
         bgGrad.addColorStop(1, '#030408');
+      } else if (isOvercast) {
+        // Trời râm: xám nhạt hơn sương mù, ít u ám
+        bgGrad.addColorStop(0, '#12161c');
+        bgGrad.addColorStop(0.6, '#0c1015');
+        bgGrad.addColorStop(1, '#05070a');
       } else if (isSnow) {
         // Freezing cold cyan-slate
         bgGrad.addColorStop(0, '#081017');
@@ -252,6 +278,53 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
           ctx.ellipse(cx, cy, fb.width / 2, 70, 0, 0, Math.PI * 2);
           ctx.fill();
         });
+      }
+
+      // Mây xám trôi chậm (trời râm)
+      cloudBanks.forEach((cb) => {
+        cb.x += cb.speed;
+        if (cb.x > width + cb.w) cb.x = -cb.w;
+        const cg = ctx.createRadialGradient(cb.x, cb.y, 10, cb.x, cb.y, cb.w / 2);
+        cg.addColorStop(0, 'rgba(120, 130, 140, 0.07)');
+        cg.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = cg;
+        ctx.beginPath();
+        ctx.ellipse(cb.x, cb.y, cb.w / 2, 46, 0, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Vệt gió lạnh thổi ngang
+      windStreaks.forEach((ws) => {
+        ws.x += ws.speed;
+        if (ws.x - ws.len > width) {
+          ws.x = -ws.len;
+          ws.y = Math.random() * height;
+        }
+        const wg = ctx.createLinearGradient(ws.x - ws.len, ws.y, ws.x, ws.y);
+        wg.addColorStop(0, 'rgba(200, 230, 255, 0)');
+        wg.addColorStop(1, `rgba(200, 230, 255, ${ws.alpha})`);
+        ctx.strokeStyle = wg;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(ws.x - ws.len, ws.y);
+        ctx.lineTo(ws.x, ws.y);
+        ctx.stroke();
+      });
+
+      // Sóng nhiệt bốc lên từ mặt đất khi nắng gắt
+      if (isHeat) {
+        ctx.lineWidth = 1;
+        for (let k = 0; k < 6; k++) {
+          const baseY = height - 150 - k * 22;
+          ctx.strokeStyle = `rgba(251, 191, 36, ${0.035 + k * 0.004})`;
+          ctx.beginPath();
+          for (let x = 0; x <= width; x += 14) {
+            const y = baseY + Math.sin(x * 0.02 + time * 1.6 + k) * 4;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
       }
 
       // Render Ambient / Heat / Snow Particles
@@ -340,6 +413,26 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
         ctx.fillRect(0, 0, width, height);
       }
 
+      // Vignette đỏ thở chậm khi mức nguy hiểm cao (không chớp nháy)
+      if (dangerLevel >= 3 || isEmergency) {
+        const pulse = 0.5 + 0.5 * Math.sin(time * (isEmergency ? 2.4 : 0.9));
+        const vAlpha = (isEmergency ? 0.18 : 0.04 * (dangerLevel - 2)) * (0.7 + 0.3 * pulse);
+        const vg = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.35, width / 2, height / 2, Math.max(width, height) * 0.75);
+        vg.addColorStop(0, 'rgba(120, 10, 10, 0)');
+        vg.addColorStop(1, `rgba(120, 10, 10, ${vAlpha})`);
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      // Viền sương giá khi trời rét
+      if (isSnow) {
+        const fg = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.4, width / 2, height / 2, Math.max(width, height) * 0.72);
+        fg.addColorStop(0, 'rgba(190, 230, 255, 0)');
+        fg.addColorStop(1, 'rgba(190, 230, 255, 0.07)');
+        ctx.fillStyle = fg;
+        ctx.fillRect(0, 0, width, height);
+      }
+
       // Ground Vignette / Dark Floor
       const groundGrad = ctx.createLinearGradient(0, height - 140, 0, height);
       groundGrad.addColorStop(0, 'rgba(0,0,0,0)');
@@ -347,7 +440,7 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
       ctx.fillStyle = groundGrad;
       ctx.fillRect(0, height - 140, width, 140);
 
-      animationFrameId = requestAnimationFrame(render);
+      if (!reduceMotion) animationFrameId = requestAnimationFrame(render);
     };
 
     render();

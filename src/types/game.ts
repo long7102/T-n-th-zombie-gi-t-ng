@@ -11,7 +11,9 @@ export type BackgroundEffectType =
   | 'thunder_soft'
   | 'fog_dense'
   | 'night_dark'
-  | 'sunny_harsh';
+  | 'sunny_harsh'
+  | 'overcast'     // Trời râm, mây xám trôi chậm, bụi bay
+  | 'frost_wind';   // Gió lạnh buốt, hơi thở thành khói, bụi băng
 
 export interface WeatherForecast {
   weather: WeatherType;
@@ -154,6 +156,12 @@ export interface MapLocation {
   description?: string;
 }
 
+// Sự kiện đã được lên lịch (có báo trước qua radio), sẽ xảy ra vào ngày dueDay
+export interface PendingEvent {
+  id: string;
+  dueDay: number;
+}
+
 export interface GameEndingState {
   is_game_over: boolean;
   is_victory: boolean;
@@ -195,7 +203,9 @@ export interface StoryTurn {
   loot_notification?: string[]; // Thông báo pop-up vật tư vừa loot được
   unlocked_map_locations?: MapLocation[]; // Bản đồ mở khóa khi thiếu nguyên liệu
   system_note?: string; // Cảnh báo thời gian thực sử dụng vật phẩm cứu trợ
-  system_trigger?: string | null; // Trigger hệ thống ép mạch truyện: 'Weather: Heavy Storm' | 'Event: Horde Attack'
+  system_trigger?: string | null; // Trigger hệ thống: tức thời ('Weather: Heavy Storm' | 'Event: Horde Attack') hoặc về TƯƠNG LAI ('Forecast: ...' | 'Upcoming: ...') -> được dịch thành radio_transmission
+  radio_transmission?: string | null; // Bản tin radio đứt quãng, nhiễu sóng, báo trước môi trường/sự kiện sắp tới (không tiết lộ kết cục)
+  scene_id?: string; // Mã cảnh/sự kiện/cột mốc đang diễn ra (chống lặp, quyết định cách xử lý lựa chọn)
   world_flags?: Record<string, boolean>; // Cột mốc thế giới đã mở khóa
   companionUpdates?: {
     name: string;
@@ -255,7 +265,7 @@ export interface GameState {
   hasApiKey: boolean;
   audioEnabled: boolean;
   volume: number;
-  unlockedMapLocations: MapLocation[];
+  unlockedMapLocations?: MapLocation[];
   lootNotifications: string[];
   worldFlags?: Record<string, boolean>;
   systemTrigger?: string | null;

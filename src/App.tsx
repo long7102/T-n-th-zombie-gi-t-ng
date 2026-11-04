@@ -47,7 +47,7 @@ import {
   WeatherType,
   WeatherForecast,
   BackgroundEffectType,
-  MapLocation,
+  PendingEvent,
 } from './types/game';
 
 import { AtmosphereCanvas } from './components/AtmosphereCanvas';
@@ -62,6 +62,8 @@ import { DynamicMapModal } from './components/DynamicMapModal';
 import { LootToast } from './components/LootToast';
 import { EmergencyEventAlert } from './components/EmergencyEventAlert';
 import { EndGameModal } from './components/EndGameModal';
+import { RadioBroadcast } from './components/RadioBroadcast';
+import { encodeMapAction, WorldNode } from './data/worldMap';
 import { sound } from './utils/audio';
 
 export default function App() {
@@ -125,8 +127,12 @@ export default function App() {
   const [dangerLevel, setDangerLevel] = useState(2);
 
   // Dynamic Map & Scavenging State
-  const [unlockedMapLocations, setUnlockedMapLocations] = useState<MapLocation[]>([]);
+  const [visitedNodes, setVisitedNodes] = useState<string[]>([]);
+  const [mapVisits, setMapVisits] = useState<Record<string, number>>({});
   const [showMapModal, setShowMapModal] = useState(false);
+
+  // Sự kiện đã lên lịch (được báo trước qua radio)
+  const [pendingEvents, setPendingEvents] = useState<PendingEvent[]>([]);
 
   // Loot Pop-up Notifications State
   const [lootNotifications, setLootNotifications] = useState<string[]>([]);
@@ -167,26 +173,15 @@ export default function App() {
       });
   }, []);
 
-  // Emergency countdown timer handler
+  // Emergency countdown: mỗi giây trừ 1; hết giờ thì xử lý đúng một lần (không gọi trong state updater như trước)
   useEffect(() => {
-    if (activeEmergency && emergencySecondsLeft > 0) {
-      emergencyTimerRef.current = window.setInterval(() => {
-        setEmergencySecondsLeft((prev) => {
-          if (prev <= 1) {
-            clearInterval(emergencyTimerRef.current!);
-            handleEmergencyTimeout();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+    if (!activeEmergency) return;
+    if (emergencySecondsLeft <= 0) {
+      handleEmergencyTimeout();
+      return;
     }
-
-    return () => {
-      if (emergencyTimerRef.current) {
-        clearInterval(emergencyTimerRef.current);
-      }
-    };
+    const id = window.setTimeout(() => setEmergencySecondsLeft((prev) => prev - 1), 1000);
+    return () => window.clearTimeout(id);
   }, [activeEmergency, emergencySecondsLeft]);
 
   // Synchronize dynamic ambient soundscape with weather & danger level
@@ -270,8 +265,12 @@ export default function App() {
           'Lén lút di chuyển sang vị trí an toàn hơn',
         ],
         customChoiceAllowed: true,
+        scene_id: data.scene_id || 'r_start',
+        system_trigger: data.system_trigger,
+        radio_transmission: data.radio_transmission,
       };
 
+      setPendingEvents(data.pending_events || []);
       setCurrentTurn(initialTurn);
       setLocation(initialTurn.location);
       setWeather(initialTurn.weather);
@@ -285,6 +284,7 @@ export default function App() {
       if (data.soundCue) {
         sound.playCue(data.soundCue);
       }
+      if (data.radio_transmission) sound.playRadioStatic();
     } catch (err) {
       console.error('Error starting story:', err);
     } finally {
@@ -324,7 +324,12 @@ export default function App() {
           player,
           base,
           companions,
-          history,
+          history: history.slice(-6),
+          doneSceneIds: history.map((h) => h.scene_id).filter(Boolean),
+          sceneId: currentTurn.scene_id,
+          turnCount,
+          tomorrowForecast,
+          pendingEvents,
           chosenAction: action,
           actionType,
           currentLocation: location,
@@ -347,7 +352,7 @@ export default function App() {
 
       const completedTurn: StoryTurn = {
         ...currentTurn,
-        selectedChoice: action,
+        selectedChoice: action.replace(/^\[MAP_TRAVEL\].*?::\s*/s, ''),
         outcome: data.outcome,
         statChanges: data.statChanges,
         itemsGained: data.itemsGained,
@@ -362,21 +367,13 @@ export default function App() {
         setLootNotifications(data.loot_notification);
       }
 
-      // Handle dynamic map unlock
-      if (data.unlocked_map_locations && data.unlocked_map_locations.length > 0) {
-        setUnlockedMapLocations(data.unlocked_map_locations);
-      }
-
-      // 1. Weather Modifiers
-      let thirstDelta = data.statChanges?.thirst || 6;
-      let staminaDelta = data.statChanges?.stamina || -8;
+      // 1. Thời tiết: hiệu ứng lên khát/thể lực đã được server tính một lần; client chỉ xét cảm sốt.
+      const thirstDelta = data.statChanges?.thirst ?? 6;
+      const staminaDelta = data.statChanges?.stamina ?? -8;
       let isFeverish = player.stats.isFeverish || false;
       let maxStamina = player.stats.maxStamina || 100;
 
-      if (data.weather === 'heatwave') {
-        thirstDelta *= 2;
-      } else if (data.weather === 'heavy_rain' || data.weather === 'freezing_cold') {
-        staminaDelta = Math.round(staminaDelta * 1.2);
+      if (data.weather === 'heavy_rain' || data.weather === 'freezing_cold') {
         if (!isFeverish && Math.random() < 0.15) {
           isFeverish = true;
           maxStamina = 70;
@@ -392,6 +389,8 @@ export default function App() {
         currentWound.status = 'open';
         currentWound.turnsUnchecked = 0;
         currentWound.locationOnBody = data.woundChange.location || 'Vết cắn trầy xước ở bắp tay';
+      } else if (data.woundChange?.healed && currentWound.hasOpenWound) {
+        currentWound = { hasOpenWound: false, status: 'none', turnsUnchecked: 0, locationOnBody: '' };
       } else if (currentWound.hasOpenWound) {
         currentWound.turnsUnchecked += 1;
         if (currentWound.turnsUnchecked >= 2 && currentWound.status === 'open') {
@@ -413,7 +412,7 @@ export default function App() {
 
       const effectiveMaxHp = lockedMaxHp || player.stats.maxHp;
       const nextHp = Math.max(0, Math.min(effectiveMaxHp, player.stats.hp + (data.statChanges?.hp || 0)));
-      const nextHunger = Math.max(0, Math.min(100, player.stats.hunger + (data.statChanges?.hunger || 5)));
+      const nextHunger = Math.max(0, Math.min(100, player.stats.hunger + (data.statChanges?.hunger ?? 5)));
       const nextThirst = Math.max(0, Math.min(100, player.stats.thirst + thirstDelta));
       const nextInfection = Math.max(0, Math.min(100, player.stats.infection + (data.statChanges?.infection || 0) + infectionPenalty));
       const nextSanity = Math.max(0, Math.min(100, player.stats.sanity + (data.statChanges?.sanity || 0) - sanityPenalty));
@@ -428,7 +427,7 @@ export default function App() {
           const newFreshness = Math.max(0, (item.freshness ?? 100) - loss);
           return { ...item, freshness: newFreshness };
         }
-        return item;
+        return { ...item };
       });
 
       let updatedBaseWarehouse = base.warehouse.map((item) => {
@@ -515,7 +514,7 @@ export default function App() {
         skills: updatedSkills,
       });
 
-      let updatedCompanions = [...companions];
+      let updatedCompanions = companions.map((c) => ({ ...c }));
       if (data.companionUpdates && data.companionUpdates.length > 0) {
         data.companionUpdates.forEach((up: any) => {
           const comp = updatedCompanions.find((c) => c.name === up.name);
@@ -601,11 +600,16 @@ export default function App() {
         isEmergency: data.isEmergency,
         emergencySeconds: data.emergencySeconds || 15,
         loot_notification: data.loot_notification,
-        unlocked_map_locations: data.unlocked_map_locations,
         system_note: data.system_note,
+        scene_id: data.scene_id,
+        system_trigger: data.system_trigger,
+        radio_transmission: data.radio_transmission,
         game_ending: data.game_ending,
       };
 
+      setPendingEvents(data.pending_events || []);
+      if (data.radio_transmission) sound.playRadioStatic();
+      if (typeof data.scene_id === 'string' && data.scene_id.startsWith('milestone_')) sound.playStinger();
       setCurrentTurn(nextTurnObj);
       setLocation(nextTurnObj.location);
       setWeather(nextTurnObj.weather);
@@ -627,13 +631,17 @@ export default function App() {
     }
   };
 
-  // Travel & Scavenge from Dynamic Map
-  const handleTravelFromMap = (loc: MapLocation, lootStyle: 'quick' | 'thorough') => {
+  // Di chuyển & lục soát từ bản đồ: hành động được mã hóa để server xử lý tất định theo quãng đường/độ nguy hiểm.
+  const handleTravelFromMap = (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number) => {
+    if (isAiProcessing) return;
     setShowMapModal(false);
-    const actionDesc = lootStyle === 'quick'
-      ? `Tôi di chuyển đến ${loc.location_name} (${loc.distance_time}), tiến hành lục soát nhanh gọn, ưu tiên giữ im lặng tuyệt đối.`
-      : `Tôi di chuyển đến ${loc.location_name} (${loc.distance_time}), dùng xà beng phá khóa tủ sắt và chấp nhận rủi ro tiếng động để tìm súng ống, vật tư cao cấp.`;
-    handleExecuteTurn(actionDesc, 'choice');
+    const visits = mapVisits[node.id] || 0;
+    const text = lootStyle === 'quick'
+      ? `Tôi di chuyển đến ${node.name} (${hops} chặng), lục soát nhanh gọn, ưu tiên giữ im lặng tuyệt đối.`
+      : `Tôi di chuyển đến ${node.name} (${hops} chặng), dùng xà beng phá khóa tủ sắt và chấp nhận rủi ro tiếng động để tìm vật tư cao cấp.`;
+    setMapVisits((prev) => ({ ...prev, [node.id]: (prev[node.id] || 0) + 1 }));
+    setVisitedNodes((prev) => (prev.includes(node.id) ? prev : [...prev, node.id]));
+    handleExecuteTurn(encodeMapAction(node.id, lootStyle, hops, visits, text), 'choice');
   };
 
   // Emergency timeout fallback
@@ -1068,7 +1076,10 @@ export default function App() {
     setHistory([]);
     setCurrentTurn(null);
     setCompanions([]);
-    setUnlockedMapLocations([]);
+    setVisitedNodes([]);
+    setMapVisits({});
+    setPendingEvents([]);
+    setTomorrowForecast(undefined);
     setLootNotifications([]);
     setActiveEmergency(false);
     setBase({
@@ -1096,6 +1107,9 @@ export default function App() {
         backgroundEffect={backgroundEffect}
         dangerLevel={dangerLevel}
         isEmergency={activeEmergency}
+        day={day}
+        cityWaterCutoff={day >= 7}
+        cityPowerBlackout={day >= 10}
       />
 
       {/* Loot Notification Pop-up Toast */}
@@ -1186,18 +1200,16 @@ export default function App() {
                 {/* Dynamic Map Scavenging Button */}
                 <button
                   onClick={() => {
-                    sound.playClick();
+                    sound.playMapOpen();
                     setShowMapModal(true);
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 border rounded text-xs font-medium transition-colors cursor-pointer ${
-                    unlockedMapLocations.length > 0
-                      ? 'bg-sky-950/70 border-sky-600 text-sky-300 hover:bg-sky-900 shadow-sm'
-                      : 'bg-neutral-800 border-neutral-700 text-neutral-400 hover:bg-neutral-700'
+                    'bg-sky-950/70 border-sky-600 text-sky-300 hover:bg-sky-900 shadow-sm'
                   }`}
                   title="Bản đồ tìm kiếm tài nguyên dã chiến"
                 >
                   <Navigation className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Bản Đồ {unlockedMapLocations.length > 0 && `(${unlockedMapLocations.length})`}</span>
+                  <span>Bản Đồ</span>
                 </button>
 
                 <button
@@ -1453,9 +1465,14 @@ export default function App() {
           {activeEmergency && (
             <EmergencyEventAlert
               secondsLeft={emergencySecondsLeft}
-              totalSeconds={15}
+              totalSeconds={currentTurn?.emergencySeconds || 15}
               onTimeout={handleEmergencyTimeout}
             />
+          )}
+
+          {/* Bản tin radio (chỉ hiện khi có thông tin về tương lai) */}
+          {currentTurn?.radio_transmission && (
+            <RadioBroadcast key={`radio-${currentTurn.turnNumber}`} text={currentTurn.radio_transmission} />
           )}
 
           {/* Story Narrative & Outcome Card (Smooth, stable, clear reading experience) */}
@@ -1581,7 +1598,6 @@ export default function App() {
             hasApiKey,
             audioEnabled,
             volume: 0.7,
-            unlockedMapLocations,
             lootNotifications,
           }}
           onRestart={handleRestartGame}
@@ -1635,9 +1651,12 @@ export default function App() {
 
       {showMapModal && (
         <DynamicMapModal
-          locations={unlockedMapLocations}
-          currentLocation={location}
-          onSelectTravel={handleTravelFromMap}
+          visitedNodes={visitedNodes}
+          visitCounts={mapVisits}
+          weather={weather}
+          stamina={player.stats.stamina}
+          homeName={base.hasBase ? base.name : location}
+          onTravel={handleTravelFromMap}
           onClose={() => setShowMapModal(false)}
         />
       )}
