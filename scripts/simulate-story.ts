@@ -9,7 +9,7 @@ let choices: string[] = ['a', 'b', 'c'];
 const player: any = {
   stats: { hp: 90, hunger: 20, thirst: 20, stamina: 90, sanity: 80, infection: 0 },
   wound: { hasOpenWound: false },
-  inventory: [{ name: 'Dao chặt thịt', category: 'weapon', quantity: 1 }, { name: 'Đồ hộp', category: 'food', quantity: 3 }],
+  inventory: [{ name: 'Dao chặt thịt', category: 'weapon', quantity: 1 }, { name: 'Đồ hộp', category: 'food', quantity: 3, hungerReduce: 30 }],
 };
 let companions: any[] = [];
 const seenSetOfChoices = new Map<string, number>();

@@ -32,6 +32,8 @@ interface CompanionPanelProps {
   onPurgeCompanion?: (companionId: string) => void;
   onClose?: () => void;
   hasSafeBase?: boolean;
+  playerGender?: 'male' | 'female' | 'other';
+  onOpenChat?: (c: Companion) => void;
 }
 
 export const CompanionPanel: React.FC<CompanionPanelProps> = ({
@@ -47,7 +49,11 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({
   onPurgeCompanion,
   onClose,
   hasSafeBase = false,
+  playerGender = 'other',
+  onOpenChat,
 }) => {
+  // Quan hệ tình cảm chỉ có giữa hai người khác giới
+  const canRomance = (c: Companion) => (playerGender === 'male' || playerGender === 'female') && c.gender !== playerGender;
   const [selectedGiftCompId, setSelectedGiftCompId] = useState<string | null>(null);
   const [socialFeedback, setSocialFeedback] = useState<{ compId: string; message: string; type: 'love' | 'warn' | 'info' } | null>(null);
 
@@ -444,6 +450,18 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({
                       <span>Hỏi Thăm</span>
                     </button>
 
+                    {onOpenChat && (
+                      <button
+                        onClick={() => { sound.playClick(); onOpenChat(comp); }}
+                        className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-sky-950/50 hover:bg-sky-900/60 text-sky-200 border border-sky-700/70 rounded text-xs font-semibold transition-colors cursor-pointer"
+                        title="Trò chuyện tự do, tâm sự, phân công"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5 text-sky-300" />
+                        <span>Trò Chuyện / Giao Việc</span>
+                      </button>
+                    )}
+
+                    {canRomance(comp) && (
                     <button
                       onClick={() => handleFlirt(comp)}
                       className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/70 rounded text-xs font-medium transition-colors cursor-pointer"
@@ -452,6 +470,8 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({
                       <Smile className="w-3.5 h-3.5 text-rose-400" />
                       <span>Tán Tỉnh</span>
                     </button>
+
+                    )}
 
                     <button
                       onClick={() => {
@@ -467,7 +487,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({
                   </div>
 
                   {/* Row 2: Deep Romance / Intimacy (Unlocked when Affection >= 85 and Base is safe) */}
-                  {(comp.affection || 0) >= 75 && (
+                  {canRomance(comp) && (comp.affection || 0) >= 75 && (
                     <button
                       onClick={() => handlePropose(comp)}
                       disabled={!hasSafeBase || (comp.affection || 0) < 85 || comp.trust < 80}

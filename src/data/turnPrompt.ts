@@ -91,3 +91,48 @@ Trả về DUY NHẤT một JSON hợp lệ (không markdown):
   "soundCue": "zombie_growl"
 }`;
 }
+
+export interface CustomPromptInput extends TurnPromptInput {
+  zoneLabel: string;
+  placeName: string;
+}
+
+// Chế độ hành động tự nhập: AI đọc văn bản người chơi gõ, phân tích ý định và viết diễn biến mới.
+// Cơ chế (chỉ số, vật phẩm nhặt được, vùng mới) đã được hệ thống tính sẵn; AI chỉ kể lại và dựng tình huống kế tiếp.
+export function buildCustomPrompt(i: CustomPromptInput): string {
+  return `Bạn là Quản trò AI của game RPG sinh tồn Zombie thực tế. 100% TIẾNG VIỆT, tả thực giác quan, không chớp nháy.
+
+NGƯỜI CHƠI VỪA TỰ GÕ HÀNH ĐỘNG: "${i.chosenAction}"
+
+NHIỆM VỤ:
+1. Đọc kỹ hành động, hiểu ý định (đi đâu, làm gì, dùng gì, với ai) và viết "outcome" 3-6 câu kể diễn biến CỤ THỂ dựa trên đúng nội dung người chơi gõ.
+2. Kết quả cơ chế đã tính sẵn, bạn PHẢI giữ đúng mọi sự thật trong đó (vật phẩm nhặt/mất, chỉ số, di chuyển): """${i.resolvedOutcome}"""
+3. Viết "situation" cho tình huống kế tiếp, nối thẳng từ hành động vừa rồi, người chơi đang ở: ${i.placeName} - ${i.zoneLabel}.
+4. Đưa ra đúng 3 "choices" mới, khác nhau rõ rệt, hợp lý với tình huống đó (mỗi lựa chọn một hướng: hành động / thận trọng / rút lui hoặc tìm người).
+
+LUẬT LOGIC KHÔNG ĐƯỢC PHÁ:
+- Không dịch chuyển tức thời: người chơi chỉ ở ${i.zoneLabel}. Muốn tới nơi khác phải nêu rõ quãng đường (ví dụ đang ở tầng 7 muốn xuống tầng trệt phải đi qua cầu thang).
+- Không bịa vật phẩm, nhân vật có tên, hay sự kiện lớn mâu thuẫn với global_state. Nhân vật mới (nếu có) chưa biết tên, chỉ mô tả ngoại hình/nghề.
+- Đồ ăn/uống thực tế: thức ăn sống cần nấu, nước chưa đun phải đun sôi; đồ tươi dễ hỏng.
+- Hiện là Ngày ${i.nextDay}, thời tiết: ${i.weatherLabel}. Hậu quả phải hợp lý và có cái giá.
+
+${RADIO_RULES}
+system_trigger = ${i.systemTrigger ? `"${i.systemTrigger}"` : 'null'}
+Bản nháp radio: ${i.radioDraft ? `"""${i.radioDraft}"""` : 'null'}
+
+=== global_state ===
+${JSON.stringify(i.globalState, null, 2)}
+
+=== local_context ===
+${i.historySummary || 'Lượt đầu.'}
+
+Trả về DUY NHẤT một JSON hợp lệ:
+{
+  "outcome": "...",
+  "situation": "...",
+  "choices": ["...", "...", "..."],
+  "radio_transmission": null,
+  "companionUpdates": [],
+  "soundCue": "zombie_growl"
+}`;
+}

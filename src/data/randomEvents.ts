@@ -196,7 +196,7 @@ export const RANDOM_EVENTS: RandomEvent[] = [
     id: 'event_rescue_pharmacist',
     category: 'new_survivor',
     title: 'Tiếng Đập Cửa Khẩn Thiết Trong Nhà Thuốc Vỡ Kính',
-    description: 'Bên trong quầy thuốc tây tối om, Dược sĩ Hương Giang đang bị 2 con zombie cào xé cửa kính tủ thuốc bảo vệ. Cô đang ôm chặt thùng thuốc kháng sinh, tuyệt vọng la hét trong khi tấm kính nứt toác rạn vỡ!',
+    description: 'Bên trong quầy thuốc tây tối om, Một cô gái mặc áo dược sĩ đang bị 2 con zombie cào xé cửa kính tủ thuốc bảo vệ. Cô đang ôm chặt thùng thuốc kháng sinh, tuyệt vọng la hét trong khi tấm kính nứt toác rạn vỡ!',
     dangerLevel: 3,
     isEmergency: true,
     emergencySeconds: 15,
@@ -220,7 +220,7 @@ export const RANDOM_EVENTS: RandomEvent[] = [
         }],
         rescuesCompanion: true, // Kết nạp Hương Giang!
         companionImpact: { trustChange: 35, comment: 'Cảm ơn anh... Nếu anh không đập gãy chân nó, em đã bị cắn rách cổ rồi. Em xin đi theo giúp anh trị thương!' },
-        outcomeNarrative: 'Bạn vung mạnh xà beng giáng thẳng vào khớp gối con zombie! Tiếng rắc rợn người vang lên, xương đùi nó gãy gập khiến nó ngã chúi xuống sàn gạch. Bạn bồi thêm một cú dứt khoát kết liễu nó và xua đuổi con còn lại. Hương Giang run rẩy bước ra từ quầy thuốc, ánh mắt tràn đầy sự biết ơn.',
+        outcomeNarrative: 'Bạn vung mạnh xà beng giáng thẳng vào khớp gối con zombie! Tiếng rắc rợn người vang lên, xương đùi nó gãy gập khiến nó ngã chúi xuống sàn gạch. Bạn bồi thêm một cú dứt khoát kết liễu nó và xua đuổi con còn lại. Cô gái run rẩy bước ra từ quầy thuốc, ánh mắt tràn đầy sự biết ơn.',
       },
       {
         id: 'rescue_throw_bottle_distract',
@@ -229,7 +229,7 @@ export const RANDOM_EVENTS: RandomEvent[] = [
         statImpact: { stamina: -10 },
         rescuesCompanion: true,
         companionImpact: { trustChange: 20, comment: 'Pha đánh lạc hướng rất thông minh... Cảm ơn anh đã cứu em.' },
-        outcomeNarrative: 'Tiếng chai vỡ choang vang lên cách đó 30 mét. Lũ zombie lập tức xoay ngoắt đầu và ùa về phía phát ra âm thanh. Bạn kéo Hương Giang lách qua cửa sổ thoát hiểm an toàn.',
+        outcomeNarrative: 'Tiếng chai vỡ choang vang lên cách đó 30 mét. Lũ zombie lập tức xoay ngoắt đầu và ùa về phía phát ra âm thanh. Bạn kéo cô gái lách qua cửa sổ thoát hiểm an toàn.',
       },
       {
         id: 'rescue_ignore_loot_drugs',
@@ -254,7 +254,7 @@ export const RANDOM_EVENTS: RandomEvent[] = [
     id: 'event_rescue_mechanic_shop',
     category: 'new_survivor',
     title: 'Thợ Hàn Bị Dồn Vào Góc Xưởng Sửa Xe Máy',
-    description: 'Chú Năm - người thợ sửa xe kỳ cựu - đang đứng trên nóc thùng phuy sắt trong xưởng. Phía dưới, 3 con zombie đang cào xé chân thùng phuy làm nó lắc lư sắp đổ. Chú đang lăm lăm mỏ hàn hơi nhưng sắp hết bình ga!',
+    description: 'Một người thợ sửa xe lớn tuổi đang đứng trên nóc thùng phuy sắt trong xưởng. Phía dưới, 3 con zombie đang cào xé chân thùng phuy làm nó lắc lư sắp đổ. Chú đang lăm lăm mỏ hàn hơi nhưng sắp hết bình ga!',
     dangerLevel: 4,
     isEmergency: true,
     emergencySeconds: 16,
@@ -263,7 +263,7 @@ export const RANDOM_EVENTS: RandomEvent[] = [
     choices: [
       {
         id: 'rescue_kick_obstacle_trip',
-        text: 'Đẩy ngã giá để phụ tùng sắt đè bẹp đàn zombie rồi kéo chú Năm xuống',
+        text: 'Đẩy ngã giá để phụ tùng sắt đè bẹp đàn zombie rồi kéo người thợ già xuống',
         tacticalNote: 'Tận dụng quán tính và trọng lực đè bẹp quái vật, giải cứu thợ cơ khí vô giá.',
         statImpact: { stamina: -25 },
         rescuesCompanion: true, // Kết nạp Chú Năm!
@@ -273,7 +273,7 @@ export const RANDOM_EVENTS: RandomEvent[] = [
           description: 'Tăng 30% hiệu quả khi gia cố then cửa căn cứ và chế tạo bẫy sắt.',
           category: 'craft',
         },
-        outcomeNarrative: 'Bạn dốc sức húc đổ chiếc giá sắt nặng hàng trăm cân! Khối kim loại đổ sập xuống nghiền nát cơ thể 3 con zombie dưới sàn. Chú Năm nhảy xuống đất vỗ vai bạn đầy thán phục. Chú đồng ý gia nhập để giúp bạn quản lý máy móc và hàn xì căn cứ.',
+        outcomeNarrative: 'Bạn dốc sức húc đổ chiếc giá sắt nặng hàng trăm cân! Khối kim loại đổ sập xuống nghiền nát cơ thể 3 con zombie dưới sàn. Người thợ già nhảy xuống đất vỗ vai bạn đầy thán phục. Chú đồng ý gia nhập để giúp bạn quản lý máy móc và hàn xì căn cứ.',
       },
       {
         id: 'rescue_fire_gas_torch',
@@ -283,7 +283,7 @@ export const RANDOM_EVENTS: RandomEvent[] = [
         statImpact: { stamina: -15 },
         rescuesCompanion: true,
         companionImpact: { trustChange: 25, comment: 'Cảm ơn cậu đã cứu ông già này. Xưởng này còn can xăng máy, tôi sẽ chia cho cậu!' },
-        outcomeNarrative: 'Vệt lửa bùng lên khiến lũ zombie bị cháy rụi và lùi lại. Chú Năm chớp thời cơ nhảy qua tường rào cùng bạn rút lui an toàn.',
+        outcomeNarrative: 'Vệt lửa bùng lên khiến lũ zombie bị cháy rụi và lùi lại. Người thợ già chớp thời cơ nhảy qua tường rào cùng bạn rút lui an toàn.',
       },
       {
         id: 'loot_gasoline_leave',

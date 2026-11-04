@@ -1,4 +1,5 @@
 import { Item } from '../types/game';
+import { LootTableId } from './lootTables';
 
 // ====================================================================
 // BẢN ĐỒ THẾ GIỚI dạng đồ thị: các điểm (node) nối với nhau bằng đường (edge).
@@ -7,7 +8,7 @@ import { Item } from '../types/game';
 // ====================================================================
 
 export type MapRegion = 'home' | 'near' | 'mid' | 'far';
-export type NodeKind = 'home' | 'hardware_store' | 'pharmacy' | 'market' | 'supermarket' | 'hospital' | 'police_station' | 'bridge' | 'industrial' | 'stadium' | 'tower' | 'depot';
+export type NodeKind = 'farm' | 'church' | 'coldstorage' | 'school' | 'fuel_station' | 'home' | 'hardware_store' | 'pharmacy' | 'market' | 'supermarket' | 'hospital' | 'police_station' | 'bridge' | 'industrial' | 'stadium' | 'tower' | 'depot';
 
 export interface WorldNode {
   id: string;
@@ -21,6 +22,17 @@ export interface WorldNode {
   resources: string[];
   connections: string[];
   loot: { common: Partial<Item>[]; rare?: Partial<Item>[] };
+  table?: LootTableId;          // bảng loot ngẫu nhiên (ưu tiên hơn loot cố định)
+  outpost?: OutpostInfo;        // nếu là cứ điểm có thể dùng làm căn cứ
+}
+
+export interface OutpostInfo {
+  baseScore: number;            // độ phù hợp làm căn cứ 0-100
+  baseKind: 'Apartment' | 'Military Base' | 'Civilian Shelter' | 'Nomad';
+  pros: string[];
+  cons: string[];
+  bonus: Record<string, number>; // công trình có sẵn khi chiếm (cấp)
+  baseName: string;
 }
 
 export const HOME_NODE_ID = 'home';
@@ -114,14 +126,103 @@ export const WORLD_NODES: WorldNode[] = [
 
 export const NODE_BY_ID: Record<string, WorldNode> = Object.fromEntries(WORLD_NODES.map((n) => [n.id, n]));
 
+// ---------- Cứ điểm ngẫu nhiên quanh căn cứ ----------
+// Mỗi ván sinh vài cứ điểm khác nhau ở vùng trung/xa. Đi loot ở đó, nếu chỗ đẹp có thể chiếm làm căn cứ mới.
+interface OutpostTemplate {
+  id: string; name: string; kind: NodeKind; region: MapRegion; danger: number; table: LootTableId; description: string; resources: string[];
+  info: OutpostInfo;
+}
+
+export const OUTPOST_TEMPLATES: OutpostTemplate[] = [
+  { id: 'hospital_basement', name: 'Tầng Hầm Bệnh Viện Cũ', kind: 'hospital', region: 'mid', danger: 4, table: 'pharmacy', description: 'Tầng hầm bê tông dày, kho thuốc còn nguyên và phòng mổ có thể thành góc y tế.', resources: ['Thuốc men', 'Giường bệnh', 'Dụng cụ y tế'],
+    info: { baseScore: 78, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Hầm Bệnh Viện', bonus: { medbay: 1, walls: 1 }, pros: ['Tường bê tông dày, khó phá', 'Có sẵn góc y tế', 'Kín gió, ít thời tiết xấu'], cons: ['Tối và ẩm', 'Không có chỗ trồng trọt'] } },
+  { id: 'workshop', name: 'Xưởng Cơ Khí Bỏ Hoang', kind: 'industrial', region: 'far', danger: 4, table: 'tools', description: 'Xưởng rộng với cửa cuốn sắt, máy móc và kho phụ tùng. Thợ giỏi biến nơi này thành pháo đài.', resources: ['Dụng cụ', 'Phụ tùng', 'Nhiên liệu'],
+    info: { baseScore: 70, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Xưởng Cơ Khí', bonus: { walls: 2 }, pros: ['Cửa cuốn sắt chắc chắn', 'Nhiều dụng cụ chế tạo', 'Chỗ rộng để xây nhiều công trình'], cons: ['Nhiều tiếng vang, dễ thu hút bầy'] } },
+  { id: 'farmhouse', name: 'Nhà Vườn Có Giếng Ngoại Ô', kind: 'farm', region: 'far', danger: 3, table: 'garden', description: 'Mảnh vườn rộng, giếng nước sạch và chuồng gia súc bỏ trống. Gần như được sinh ra để làm nơi tự cung tự cấp.', resources: ['Rau quả', 'Giếng nước', 'Đất trồng'],
+    info: { baseScore: 84, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Nhà Vườn', bonus: { well: 1, garden: 1 }, pros: ['Có giếng nước sạch', 'Vườn trồng sẵn', 'Xa thành phố, ít bầy lớn'], cons: ['Tường rào mỏng, cần gia cố', 'Xa các điểm loot lớn'] } },
+  { id: 'fuel_station', name: 'Trạm Xăng Đóng Cửa', kind: 'fuel_station', region: 'mid', danger: 3, table: 'vehicle', description: 'Trạm nhỏ còn vài bể xăng dưới đất. Quá trống trải để ở lâu, nhưng nhiên liệu thì quý.', resources: ['Xăng dầu', 'Đồ ăn nhanh', 'Dụng cụ'],
+    info: { baseScore: 38, baseKind: 'Nomad', baseName: 'Điểm dừng Trạm Xăng', bonus: {}, pros: ['Nhiên liệu dồi dào'], cons: ['Trống trải, dễ bị phát hiện', 'Nguy cơ cháy nổ'] } },
+  { id: 'old_church', name: 'Nhà Thờ Đá Kiên Cố', kind: 'church', region: 'mid', danger: 3, table: 'domestic', description: 'Tường đá dày, cổng gỗ lim và tháp chuông cao: nơi trú ẩn của người xưa, đáng tin hơn cả nhà hiện đại.', resources: ['Đồ gia dụng', 'Nến', 'Chăn'],
+    info: { baseScore: 76, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Nhà Thờ Đá', bonus: { walls: 2, watchtower: 1 }, pros: ['Tường đá, cổng gỗ lim rất chắc', 'Tháp chuông làm tháp canh', 'Yên tĩnh, tinh thần dễ chịu'], cons: ['Lạnh về đêm', 'Không có nguồn nước gần'] } },
+  { id: 'cold_storage', name: 'Kho Lạnh Công Nghiệp', kind: 'coldstorage', region: 'far', danger: 4, table: 'warehouse', description: 'Kho lạnh lớn với tường cách nhiệt dày. Hàng trong kho đã ôi nhưng đồ khô vẫn còn.', resources: ['Đồ dự trữ', 'Gạo', 'Nước đóng chai'],
+    info: { baseScore: 66, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Kho Lạnh', bonus: { walls: 1 }, pros: ['Tường cách nhiệt, rất chắc', 'Kho chứa khổng lồ'], cons: ['Mùi thối thu hút zombie', 'Cần điện để vận hành tủ lạnh'] } },
+  { id: 'school', name: 'Trường Học Có Sân & Bể Nước', kind: 'school', region: 'mid', danger: 3, table: 'office', description: 'Sân rộng, bể nước lớn trên mái và nhiều phòng học trống. Dễ chứa cả một nhóm lớn.', resources: ['Văn phòng phẩm', 'Nước', 'Đồ cá nhân'],
+    info: { baseScore: 68, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Trường Học', bonus: { rain_collector: 1 }, pros: ['Bể nước lớn trên mái', 'Nhiều phòng, chứa được đông người', 'Sân trồng rau'], cons: ['Cửa kính nhiều, khó giữ', 'Hành lang dài dễ bị tập kích'] } },
+  { id: 'hill_station', name: 'Trạm Phát Sóng Trên Đồi', kind: 'tower', region: 'far', danger: 4, table: 'electronics', description: 'Tháp phát sóng cũ trên đồi cao, thấy rõ mọi hướng và còn nguồn điện dự phòng.', resources: ['Pin', 'Radio', 'Dây điện'],
+    info: { baseScore: 60, baseKind: 'Military Base', baseName: 'Căn cứ Trạm Phát Sóng', bonus: { watchtower: 2 }, pros: ['Tầm nhìn bao quát mọi hướng', 'Gần như không ai tới', 'Bắt radio rất tốt'], cons: ['Khó tìm nước', 'Gió lớn, lạnh'] } },
+];
+
+const OUTPOST_BY_TEMPLATE: Record<string, OutpostTemplate> = Object.fromEntries(OUTPOST_TEMPLATES.map((o) => [o.id, o]));
+const RING_X: Record<string, number> = { mid: 29, far: 43 };
+
+function outpostToNode(tpl: OutpostTemplate, x: number, y: number, connections: string[]): WorldNode {
+  return {
+    id: 'op_' + tpl.id, name: tpl.name, kind: tpl.kind, region: tpl.region, x, y, danger: tpl.danger,
+    description: tpl.description, resources: tpl.resources, connections, loot: { common: [] }, table: tpl.table, outpost: tpl.info,
+  };
+}
+
+export interface OutpostInstance { id: string; x: number; y: number; connections: string[] }
+
+// Sinh ngẫu nhiên cứ điểm cho một ván chơi (lưu trong state/save).
+export function generateOutposts(count = 4, rng: () => number = Math.random): OutpostInstance[] {
+  const pool = [...OUTPOST_TEMPLATES].sort(() => rng() - 0.5).slice(0, count);
+  const placed: { x: number; y: number }[] = WORLD_NODES.map((n) => ({ x: n.x, y: n.y }));
+  const out: OutpostInstance[] = [];
+  const home = NODE_BY_ID[HOME_NODE_ID];
+  for (const tpl of pool) {
+    let best: { x: number; y: number } | null = null;
+    for (let i = 0; i < 40; i++) {
+      const ang = rng() * Math.PI * 2;
+      const rx = RING_X[tpl.region] + (rng() - 0.5) * 4;
+      const x = home.x + Math.cos(ang) * rx;
+      const y = home.y + Math.sin(ang) * rx * RING_Y_RATIO;
+      if (x < 5 || x > 95 || y < 5 || y > 66) continue;
+      if (placed.every((p) => Math.hypot(p.x - x, (p.y - y) / RING_Y_RATIO) > 10)) { best = { x, y }; break; }
+    }
+    if (!best) continue;
+    placed.push(best);
+    const near = WORLD_NODES.filter((n) => n.id !== HOME_NODE_ID)
+      .map((n) => ({ id: n.id, d: Math.hypot(n.x - best!.x, n.y - best!.y) }))
+      .sort((a, b) => a.d - b.d).slice(0, 2).map((n) => n.id);
+    out.push({ id: 'op_' + tpl.id, x: +best.x.toFixed(1), y: +best.y.toFixed(1), connections: near });
+  }
+  return out;
+}
+
+export function buildOutpostNodes(instances: OutpostInstance[]): WorldNode[] {
+  return instances
+    .map((i) => {
+      const tpl = OUTPOST_BY_TEMPLATE[i.id.replace(/^op_/, '')];
+      return tpl ? outpostToNode(tpl, i.x, i.y, i.connections) : null;
+    })
+    .filter(Boolean) as WorldNode[];
+}
+
+// Tìm node theo id, kể cả cứ điểm (server không biết vị trí nên toạ độ là 0).
+export function getNodeAny(id: string): WorldNode | undefined {
+  if (NODE_BY_ID[id]) return NODE_BY_ID[id];
+  const tpl = OUTPOST_BY_TEMPLATE[id.replace(/^op_/, '')];
+  return tpl ? outpostToNode(tpl, 0, 0, []) : undefined;
+}
+
+// ---------- Đồ thị (đối xứng) gồm điểm cố định + cứ điểm ngẫu nhiên ----------
+function adjacency(extra: WorldNode[]): Record<string, Set<string>> {
+  const adj: Record<string, Set<string>> = {};
+  const add = (a: string, b: string) => { (adj[a] ||= new Set()).add(b); (adj[b] ||= new Set()).add(a); };
+  for (const n of [...WORLD_NODES, ...extra]) for (const c of n.connections) add(n.id, c);
+  return adj;
+}
+
 // Đường đi ngắn nhất (số chặng) từ -> đến, trả về danh sách node.
-export function shortestPath(from: string, to: string): string[] {
+export function shortestPath(from: string, to: string, extra: WorldNode[] = []): string[] {
   if (from === to) return [from];
+  const adj = adjacency(extra);
   const prev: Record<string, string | null> = { [from]: null };
   const queue = [from];
   while (queue.length) {
     const cur = queue.shift() as string;
-    for (const nb of NODE_BY_ID[cur]?.connections || []) {
+    for (const nb of adj[cur] || []) {
       if (nb in prev) continue;
       prev[nb] = cur;
       if (nb === to) {
@@ -136,23 +237,25 @@ export function shortestPath(from: string, to: string): string[] {
   return [from];
 }
 
-// Điểm đã nhìn thấy: nơi trú ẩn, các điểm đã tới và tất cả điểm kề chúng.
-export function revealedNodes(visited: string[]): Set<string> {
+// Điểm đã nhìn thấy: nơi trú ẩn, các điểm đã tới và tất cả điểm kề chúng (sương mù chiến tranh).
+export function revealedNodes(visited: string[], extra: WorldNode[] = []): Set<string> {
+  const adj = adjacency(extra);
   const seen = new Set<string>([HOME_NODE_ID]);
   for (const id of [HOME_NODE_ID, ...visited]) {
     seen.add(id);
-    (NODE_BY_ID[id]?.connections || []).forEach((c) => seen.add(c));
+    (adj[id] || new Set()).forEach((c) => seen.add(c));
   }
   return seen;
 }
 
-// Mọi điểm đã hiện ra đều chọn được; điểm chưa hiện ra thì ẩn hẳn (sương mù chiến tranh).
+// Mọi điểm đã hiện ra đều chọn được; điểm chưa hiện ra thì ẩn hẳn.
 export const knownNodes = revealedNodes;
 
 export const REGION_LABEL: Record<MapRegion, string> = { home: 'Căn cứ', near: 'Vùng gần', mid: 'Vùng trung', far: 'Vùng xa' };
 export const KIND_ICON: Record<NodeKind, string> = {
   home: '🏠', hardware_store: '🔧', pharmacy: '💊', market: '🛒', supermarket: '📦', hospital: '🏥',
   police_station: '🚓', bridge: '🌉', industrial: '🏭', stadium: '🏟️', tower: '🏙️', depot: '🪖',
+  farm: '🏡', church: '⛪', coldstorage: '🧊', school: '🏫', fuel_station: '⛽',
 };
 
 // Mã hóa/giải mã hành động di chuyển để server xử lý tất định.

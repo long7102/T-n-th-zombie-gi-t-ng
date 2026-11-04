@@ -73,6 +73,7 @@ export interface Item {
   isSealed?: boolean;     // Đồ hộp nguyên kẹp chì (không hỏng cho đến khi mở)
   isCooked?: boolean;     // Đã được nấu chín an toàn
   isDried?: boolean;      // Thịt sấy khô / ướp muối bảo quản lâu dài
+  needsCooking?: boolean; // Gạo, mì, trứng, cá, thịt, nước chưa đun: ăn/uống sống sẽ hại bụng, phải nấu chín trước
 }
 
 export interface WoundState {
@@ -90,6 +91,9 @@ export interface BaseCamp {
   fortification: number;  // 0 - 100% (Độ kiên cố chống bầy zombie xô đẩy)
   base_type?: 'Apartment' | 'Military Base' | 'Civilian Shelter' | 'Nomad';
   warehouse: Item[];      // Kho chứa an toàn trong căn cứ
+  modules?: Record<string, number>; // Cấp của từng công trình (hệ thống khép kín)
+  fuel?: number;          // Nhiên liệu dự trữ (bếp, máy phát, lọc nước)
+  baseNodeId?: string;    // Cứ điểm trên bản đồ đang dùng làm căn cứ (nếu có)
   facilities: {
     hasStove: boolean;           // Bếp dã chiến nấu ăn
     hasFoamBox: boolean;         // Thùng xốp ướp muối giảm hỏng
@@ -129,10 +133,16 @@ export interface Companion {
   lastComment?: string;
   hasBeenRescued?: boolean; // Chỉ gia nhập khi được cứu hộ cụ thể
   intimacyLevel?: 'stranger' | 'friend' | 'close' | 'romantic' | 'soulmate'; // Mức độ quan hệ
+  realName?: string;     // Tên thật, chỉ lộ ra khi đã đủ tin tưởng/đủ lâu (name là biệt danh theo ngoại hình cho đến lúc đó)
+  nameKnown?: boolean;   // false = chưa biết tên
+  joinedTurn?: number;   // Lượt gia nhập (để tính lúc lộ tên)
+  assignment?: string;   // Vai trò được giao: guard | cook | scout | repair | medic | forage | rest
+  askedPlayerName?: boolean; // Đã hỏi tên người chơi chưa
 }
 
 export interface PlayerCharacter {
   name: string;
+  nameKnown?: boolean; // false = chưa ai biết tên bạn; chỉ nói ra khi người khác hỏi
   gender: 'male' | 'female' | 'other';
   background: string;
   backgroundTitle: string;
@@ -205,6 +215,7 @@ export interface StoryTurn {
   system_note?: string; // Cảnh báo thời gian thực sử dụng vật phẩm cứu trợ
   system_trigger?: string | null; // Trigger hệ thống: tức thời ('Weather: Heavy Storm' | 'Event: Horde Attack') hoặc về TƯƠNG LAI ('Forecast: ...' | 'Upcoming: ...') -> được dịch thành radio_transmission
   radio_transmission?: string | null; // Bản tin radio đứt quãng, nhiễu sóng, báo trước môi trường/sự kiện sắp tới (không tiết lộ kết cục)
+  zone?: string; // Vùng người chơi đang đứng: shelter | near | outside | roof
   scene_id?: string; // Mã cảnh/sự kiện/cột mốc đang diễn ra (chống lặp, quyết định cách xử lý lựa chọn)
   world_flags?: Record<string, boolean>; // Cột mốc thế giới đã mở khóa
   companionUpdates?: {

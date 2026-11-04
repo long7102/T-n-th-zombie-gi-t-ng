@@ -1,9 +1,12 @@
 import { Companion, Item, PendingEvent, WeatherForecast, WeatherType } from '../types/game';
 import { RANDOM_EVENTS, REALISTIC_SURVIVOR_ROSTER, RandomEvent } from './randomEvents';
 import { STORY_MILESTONES } from './storyBranches';
-import { ROUTINE_SCENES, RoutineChoice, SceneCtx, SceneStats, WEATHER_FLAVOR } from './routineScenes';
+import { OPENING_SETS, ROUTINE_SCENES, RoutineChoice, RoutineScene, SceneCtx, SceneStats, WEATHER_FLAVOR } from './scenes';
+import { fill, getSetting, locationText, moveText, Setting, Zone } from './settings';
+import { LootTableId, rollLoot } from './lootTables';
+import { parseStrangerId, resolveStranger, rollStranger, strangerScene, strangerZones, StrangerSpec } from './strangers';
 import { buildRadioTransmission, RadioIntel } from './radio';
-import { decodeMapAction, NODE_BY_ID, REGION_LABEL } from './worldMap';
+import { decodeMapAction, getNodeAny, REGION_LABEL } from './worldMap';
 
 // ====================================================================
 // STORY DIRECTOR - "đạo diễn" cốt truyện chạy ở server.
@@ -28,12 +31,16 @@ export interface ChosenResolution {
   companionUpdates: any[];
   ending?: { is_game_over: boolean; is_victory: boolean; epilogue?: string; cause_of_death?: string };
   failed?: boolean;
+  zone?: Zone;
+  flags?: string[];
+  flagsRemove?: string[];
   deterministic: boolean;
 }
 
 export interface NextScene {
   id: string;
   kind: 'routine' | 'event' | 'milestone';
+  zone: Zone;
   situation: string;
   choices: [string, string, string];
   isEmergency: boolean;
@@ -60,6 +67,10 @@ export interface TurnPlan {
   needMap: boolean;
   baseStats: Required<Omit<SceneStats, 'hp' | 'infection'>> & { hp: number; infection: number };
   recentChoices: string[];
+  zone: Zone;
+  settingId: string;
+  location: string;
+  awayTurns: number;
 }
 
 const WEATHERS: WeatherType[] = ['clear', 'heatwave', 'heavy_rain', 'freezing_cold', 'dense_fog', 'night_dark'];
@@ -244,7 +255,10 @@ const COMPANION_LINES = [
 // ---------- Tiện ích ----------
 const uid = (s: string) => `${s}_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
 const norm = (t: string) => t.replace(/\s*\[Thiếu:[^\]]*\]\s*$/, '').trim();
-const hasItem = (inv: any[], re: RegExp) => inv.some((i) => re.test(i.name || '') && (i.quantity ?? 1) > 0);
+const hasItem = (inv: any[], re: RegExp, cat?: string) =>
+  inv.some((i) => re.test(i.name || '') && (i.quantity ?? 1) > 0 && (!cat || i.category === cat));
+const pickFrom = <T,>(arr: T[], rng: Rng): T => arr[Math.floor(rng() * arr.length)];
+const realNameOf = (c: any): string => c.realName || c.name || '';
 
 const blankRes = (kind: ChosenResolution['kind'], outcome: string): ChosenResolution => ({
   kind, outcome, stats: {}, gain: [], lose: [], companionUpdates: [], deterministic: false,
@@ -262,22 +276,80 @@ function failMissing(kind: ChosenResolution['kind'], label: string): ChosenResol
   return r;
 }
 
+// Nhân vật mới luôn chưa biết tên: dùng biệt danh theo ngoại hình/nghề cho đến khi họ cho bạn biết.
+function anonymize(c: Companion, turn: number): Companion {
+  if (c.nameKnown === false) return c;
+  const alias = `${c.gender === 'female' ? 'Người phụ nữ lạ' : 'Người đàn ông lạ'} (${(c.role || 'người sống sót').toLowerCase()})`;
+  return { ...c, realName: c.realName || c.name, name: alias, nameKnown: false, joinedTurn: turn };
+}
+
 function eventById(id: string): RandomEvent | undefined {
   return RANDOM_EVENTS.find((e) => e.id === id);
 }
-
 function milestoneById(id: string) {
   return STORY_MILESTONES.find((m) => m.id === id);
 }
 
+// Ăn thật: chọn món theo sở thích (ready = ăn liền, cook = món cần nấu), tính độ no, đồ sống/ôi gây hại.
+function applyEating(r: ChosenResolution, inv: any[], mode: 'ready' | 'cook' | 'any', mult: number, preferred?: any) {
+  const foods = inv.filter((i) => i.category === 'food' && (i.hungerReduce ?? 0) > 0 && (i.quantity ?? 1) > 0);
+  const byFresh = (a: any, b: any) => (a.freshness ?? 999) - (b.freshness ?? 999);
+  let pool = foods;
+  if (mode === 'cook') pool = foods.filter((f) => f.needsCooking && !f.isCooked);
+  if (mode === 'ready') pool = foods.filter((f) => !f.needsCooking || f.isCooked);
+  if (!pool.length) pool = foods;
+  const food = preferred || [...pool].sort(byFresh)[0];
+  if (!food) return false;
+  const rawEaten = food.needsCooking && !food.isCooked && mode !== 'cook';
+  const spoiled = food.freshness !== undefined && food.freshness < 30;
+  let relief = Math.round(food.hungerReduce * mult * (spoiled ? 0.5 : 1) * (rawEaten ? 0.55 : 1));
+  r.stats.hunger = (r.stats.hunger ?? 0) - relief;
+  r.lose.push({ name: food.name, quantity: 1 });
+  r.outcome += ` (Đã dùng: ${food.name}.)`;
+  if (rawEaten) {
+    r.stats.infection = (r.stats.infection ?? 0) + 8;
+    r.stats.stamina = (r.stats.stamina ?? 0) - 4;
+    r.outcome += ' Ăn sống thứ này khiến bụng bạn cồn cào khó chịu: lẽ ra nên nấu chín trước.';
+  }
+  if (spoiled) {
+    r.stats.infection = (r.stats.infection ?? 0) + 6;
+    r.outcome += ' Thức ăn đã ôi, bụng bạn quặn lên ngay sau đó.';
+  }
+  return true;
+}
+
+function applyDrinking(r: ChosenResolution, inv: any[], preferred?: any) {
+  const waters = inv.filter((i) => (i.thirstReduce ?? 0) > 0 && (i.quantity ?? 1) > 0);
+  const w = preferred || [...waters].sort((a, b) => Number(!!a.needsCooking) - Number(!!b.needsCooking))[0];
+  if (!w) return false;
+  r.stats.thirst = (r.stats.thirst ?? 0) - Math.round(w.thirstReduce);
+  r.lose.push({ name: w.name, quantity: 1 });
+  r.outcome += ` (Đã uống: ${w.name}.)`;
+  if (w.needsCooking && !w.isCooked) {
+    r.stats.infection = (r.stats.infection ?? 0) + 7;
+    r.outcome += ' Nước chưa đun sôi khiến bụng bạn đau quặn: nhớ đun sôi lần sau.';
+  }
+  return true;
+}
+
+function withMove(r: ChosenResolution, setting: Setting, from: Zone, to: Zone) {
+  if (from === to) return r;
+  const mv = moveText(setting, from, to);
+  r.outcome = `${r.outcome}${r.outcome && !/\s$/.test(r.outcome) ? ' ' : ''}${mv}`.trim();
+  r.zone = to;
+  return r;
+}
+
 // ---------- Xử lý hành động của người chơi ----------
-function resolveAction(req: any, rng: Rng): ChosenResolution {
-  const mapTrip = decodeMapAction(req.chosenAction || '');
-  if (mapTrip) return resolveMapTravel(mapTrip, req, rng);
-  const action = norm(req.chosenAction || '');
-  const inv: any[] = req.player?.inventory || [];
-  const sceneId: string = req.sceneId || '';
+function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: number): ChosenResolution {
   const comps: any[] = req.companions || [];
+  const inv: any[] = req.player?.inventory || [];
+
+  const mapTrip = decodeMapAction(req.chosenAction || '');
+  if (mapTrip) return resolveMapTravel(mapTrip, req, rng, setting, zone);
+
+  const action = norm(req.chosenAction || '');
+  const sceneId: string = req.sceneId || '';
 
   if (req.actionType === 'emergency_timeout') {
     const r = blankRes('timeout', 'Cơ thể bạn đông cứng vì sợ hãi. Khi tỉnh lại, khoảnh khắc quyết định đã trôi qua và hậu quả ập xuống: bạn bị thương và mất bình tĩnh, còn cơ hội cứu người hoặc đoạt đồ đã vuột khỏi tầm tay.');
@@ -286,12 +358,42 @@ function resolveAction(req: any, rng: Rng): ChosenResolution {
     return r;
   }
 
-  const routine = ROUTINE_SCENES.find((s) => s.id === sceneId);
-  if (routine) {
-    const ch = routine.choices.find((c) => c.text === action);
-    if (ch) return fromRoutineChoice(ch, inv);
+  // Mở đầu
+  if (sceneId.startsWith('r_start')) {
+    const n = parseInt(sceneId.split(':')[1] || '', 10);
+    const ch = Number.isNaN(n) ? undefined : OPENING_SETS[n % OPENING_SETS.length].find((c) => fill(c.text, setting) === action);
+    if (ch) return fromRoutineChoice(ch, inv, comps, '', rng, setting, zone);
   }
 
+  // Cảnh thường
+  const routine = ROUTINE_SCENES.find((s) => s.id === sceneId);
+  if (routine) {
+    const ch = routine.choices.find((c) => fill(c.text, setting) === action);
+    if (ch) return fromRoutineChoice(ch, inv, comps, sceneId, rng, setting, zone);
+  }
+
+  // Người lạ ngẫu nhiên
+  const spec = parseStrangerId(sceneId);
+  if (spec) {
+    const sc = strangerScene(spec, setting);
+    const idx = sc.choices.findIndex((c) => c === action);
+    if (idx >= 0) {
+      const sr = resolveStranger(spec, idx, turn, rng);
+      if (sr.requires && !hasItem(inv, sr.requires.re)) return failMissing('event', sr.requires.label);
+      const r = blankRes('event', sr.outcome);
+      r.stats = { ...sr.stats };
+      r.gain = sr.gain;
+      r.lose = sr.lose.filter((l) => hasItem(inv, new RegExp(l.name, 'i')));
+      if (sr.recruit) {
+        if (comps.length >= 3) r.outcome += ' Nhóm của bạn đã đủ đông, người đó đành tìm đường riêng.';
+        else { r.newCompanion = sr.recruit; r.flags = ['saved_stranger']; }
+      } else if (sr.abandon) r.flags = ['abandoned_stranger'];
+      r.deterministic = true;
+      return r;
+    }
+  }
+
+  // Sự kiện có sẵn
   const ev = eventById(sceneId);
   if (ev) {
     const ch = ev.choices.find((c) => c.text === action);
@@ -305,12 +407,26 @@ function resolveAction(req: any, rng: Rng): ChosenResolution {
       r.lose = (ch.itemsLost || []).filter((l) => hasItem(inv, new RegExp(l.name, 'i')));
       if (ch.newSkillAwarded) r.newSkill = ch.newSkillAwarded;
       if (ch.rescuesCompanion && ev.survivorCandidate && !comps.some((c) => c.id === ev.survivorCandidate!.id)) {
-        r.newCompanion = {
-          ...ev.survivorCandidate,
-          trust: Math.min(100, ev.survivorCandidate.trust + (ch.companionImpact?.trustChange || 0)),
-          lastComment: ch.companionImpact?.comment || ev.survivorCandidate.lastComment,
-          hasBeenRescued: true,
-        };
+        if (comps.length >= 3) r.outcome += ' Nhóm của bạn đã đủ đông, người đó đành tìm đường riêng.';
+        else {
+          r.newCompanion = anonymize({
+            ...ev.survivorCandidate,
+            trust: Math.min(100, ev.survivorCandidate.trust + (ch.companionImpact?.trustChange || 0)),
+            lastComment: ch.companionImpact?.comment || ev.survivorCandidate.lastComment,
+            hasBeenRescued: true,
+          }, turn);
+        }
+      }
+      if (ev.survivorCandidate && !ch.rescuesCompanion) r.flags = ['abandoned_survivor'];
+      if (ch.id === 'raider_molotov_counter') r.flags = ['killed_raiders'];
+      if (ev.id === 'event_horde_night' && req.base?.hasBase) {
+        const fort = req.base.fortification || 0;
+        const f = Math.min(0.5, fort / 200);
+        (['stamina', 'sanity'] as const).forEach((k) => {
+          if ((r.stats[k] ?? 0) < 0) r.stats[k] = Math.round((r.stats[k] as number) * (1 - f));
+        });
+        if (req.base.facilities?.hasTripwireAlarms) r.stats.sanity = (r.stats.sanity ?? 0) + 3;
+        r.outcome += ` Căn cứ được gia cố ${fort}% giúp bạn chịu đựng dễ hơn hẳn.${req.base.facilities?.hasTripwireAlarms ? ' Chuông báo động giăng quanh cửa cho bạn kịp phản ứng.' : ''}`;
       }
       if (ch.id === 'sewer_dodge_and_retreat') r.woundChange = { inflicted: true, location: 'Vết cào ở mắt cá chân' };
       if (ch.id === 'drop_rush_crate') r.woundChange = { inflicted: true, location: 'Vết cào rách ở cánh tay' };
@@ -319,6 +435,7 @@ function resolveAction(req: any, rng: Rng): ChosenResolution {
     }
   }
 
+  // Cột mốc
   const ms = milestoneById(sceneId);
   if (ms) {
     const mc = ms.majorChoices.find((c) => c.label === action);
@@ -331,8 +448,8 @@ function resolveAction(req: any, rng: Rng): ChosenResolution {
       if (fx.skill) r.newSkill = fx.skill;
       if (fx.recruit) {
         const cand = REALISTIC_SURVIVOR_ROSTER.find((c) => c.id === fx.recruit);
-        if (cand && !comps.some((c) => c.id === cand.id)) {
-          r.newCompanion = { ...cand, trust: Math.min(100, cand.trust + 30), hasBeenRescued: true };
+        if (cand && !comps.some((c) => c.id === cand.id) && comps.length < 3) {
+          r.newCompanion = anonymize({ ...cand, trust: Math.min(100, cand.trust + 30), hasBeenRescued: true }, turn);
         }
       }
       if (fx.companionStatus && comps[0]) {
@@ -345,22 +462,26 @@ function resolveAction(req: any, rng: Rng): ChosenResolution {
           dialogue: fx.companionStatus.status === 'deceased' ? undefined : 'Em sẽ không quên chuyện này đâu.',
         });
       }
-      if (fx.ending) {
-        r.ending = { is_game_over: false, is_victory: true, epilogue: fx.ending };
-      }
+      r.flags = [fx.tag];
+      if (fx.ending) r.ending = { is_game_over: false, is_victory: true, epilogue: fx.ending };
       r.deterministic = true;
       return r;
     }
   }
 
-  return resolveCustom(action, inv, rng);
+  // Còn lại: hành động người chơi tự nhập (hoặc cảnh do AI tạo) -> phân tích ý định
+  return resolveCustom(action, inv, comps, rng, setting, zone, turn, req);
 }
 
-
 // ---------- Di chuyển trên bản đồ: tất định theo quãng đường, độ nguy hiểm và số lần đã ghé ----------
-function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hops: number; visits: number; text: string }, req: any, rng: Rng): ChosenResolution {
-  const node = NODE_BY_ID[mt.nodeId];
-  if (!node) return resolveCustom(mt.text, req.player?.inventory || [], rng);
+const NODE_TABLE: Record<string, LootTableId> = {
+  hardware: 'hardware', pharmacy: 'pharmacy', market: 'market', grocer: 'warehouse', hospital: 'pharmacy',
+  bridge: 'vehicle', industrial: 'hardware', tower: 'office', stadium: 'warehouse',
+};
+
+function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hops: number; visits: number; text: string }, req: any, rng: Rng, setting: Setting, zone: Zone): ChosenResolution {
+  const node = getNodeAny(mt.nodeId);
+  if (!node) return resolveCustom(mt.text, req.player?.inventory || [], req.companions || [], rng, setting, zone, req.turnCount || 1, req);
   const weather: WeatherType = req.weather || 'clear';
   const thorough = mt.style === 'thorough';
   const hops = Math.max(1, mt.hops);
@@ -372,11 +493,12 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
   const stats: SceneStats = { stamina, hunger: 2 * hops, thirst: 2 * hops, hp: 0, sanity: 0 };
 
   const lines: string[] = [];
+  if (zone !== 'shelter') lines.push(moveText(setting, zone, 'shelter'));
+  lines.push(`Bạn chuẩn bị đồ rồi rời ${setting.labels.shelter} đi một chuyến dài.`);
   lines.push(hops === 1
     ? `Bạn lách qua những con ngõ quen thuộc để tới ${node.name} (${REGION_LABEL[node.region]}).`
     : `Bạn băng qua ${hops} chặng đường, tránh các ổ zombie để tiến sâu vào ${REGION_LABEL[node.region].toLowerCase()}: ${node.name}.`);
 
-  // Mỗi chặng có thể chạm trán; càng xa và càng nguy hiểm càng dễ gặp.
   const encounterChance = 0.08 + node.danger * 0.04 + (thorough ? 0.08 : 0);
   let hit = 0;
   for (let i = 0; i < hops; i++) if (rng() < encounterChance) hit++;
@@ -387,12 +509,17 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
     if (rng() < 0.4) r.woundChange = { inflicted: true, location: 'Vết cào rách trên cẳng tay' };
   }
 
-  // Lục soát: ghé lại nhiều lần thì vật tư cạn dần.
   const depletion = 1 / (1 + mt.visits);
-  const gained: Partial<Item>[] = [];
-  for (const it of node.loot.common) {
-    const q = Math.max(0, Math.round((it.quantity || 1) * depletion * (thorough ? 1.2 : 1)));
-    if (q >= 1 || rng() < depletion) gained.push({ ...it, quantity: Math.max(1, q) });
+  let gained: Partial<Item>[] = [];
+  const table = node.table || NODE_TABLE[node.id];
+  if (table) {
+    const n = Math.max(1, Math.round((thorough ? 4 : 2) * Math.max(0.4, depletion)));
+    gained = rollLoot(table, n, rng);
+  } else {
+    for (const it of node.loot.common) {
+      const q = Math.max(0, Math.round((it.quantity || 1) * depletion * (thorough ? 1.2 : 1)));
+      if (q >= 1 || rng() < depletion) gained.push({ ...it, quantity: Math.max(1, q) });
+    }
   }
   if (thorough && node.loot.rare && rng() < 0.55 * Math.max(0.35, depletion)) {
     gained.push(pickFrom(node.loot.rare, rng));
@@ -409,27 +536,46 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
   }
   if (!gained.length) lines.push('Nơi này gần như đã bị vét sạch từ những lần ghé trước, bạn quay về tay không.');
   else if (mt.visits > 0) lines.push('Vật tư ở đây đã vơi đi nhiều sau những lần ghé trước.');
+  lines.push(`Cuối cùng bạn quay trở về ${setting.labels.shelter}, mệt lả.`);
 
   r.gain = toItems(gained);
   r.stats = stats;
   r.outcome = lines.join(' ');
+  r.zone = 'shelter';
   return r;
 }
 
-function fromRoutineChoice(ch: RoutineChoice, inv: any[]): ChosenResolution {
-  const miss = (ch.requires || []).find((q) => !hasItem(inv, q.re));
+function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId: string, rng: Rng, setting: Setting, zone: Zone): ChosenResolution {
+  const medic = sceneId === 'r_wound_care' ? comps.find((c) => /Uyên|Giang|y tá|dược sĩ|sinh viên y/i.test(`${realNameOf(c)} ${c.role || ''}`) && c.status !== 'deceased') : undefined;
+  const miss = medic ? undefined : (ch.requires || []).find((q) => !hasItem(inv, q.re));
   if (miss) return failMissing('routine', miss.label);
-  const r = blankRes('routine', ch.outcome);
+  const r = blankRes('routine', fill(ch.outcome, setting));
   r.stats = { ...(ch.stats || {}) };
-  r.gain = toItems(ch.gain);
+  r.gain = [...toItems(ch.gain)];
+  const rolls = ch.roll ? (Array.isArray(ch.roll) ? ch.roll : [ch.roll]) : [];
+  for (const ro of rolls) if (rng() < (ro.chance ?? 1)) r.gain.push(...rollLoot(ro.table, ro.n, rng));
+  if (ch.flags) r.flags = [...ch.flags];
+  if (ch.flagsRemove) r.flagsRemove = [...ch.flagsRemove];
   r.lose = (ch.lose || []).filter((l) => hasItem(inv, new RegExp(l.name, 'i')));
   if (ch.healWound) r.woundChange = { healed: true };
   if (ch.inflictWound) r.woundChange = { inflicted: true, location: ch.inflictWound };
+
+  if (r.gain.length) r.outcome += ` Bạn nhặt được: ${r.gain.map((g) => `${g.name} x${g.quantity}`).join(', ')}.`;
+  else if (rolls.length) r.outcome += ' Nhưng lần này bạn không tìm được gì đáng kể.';
+
+  if (medic) {
+    r.outcome += ` ${medic.name} nhanh tay làm sạch và băng lại giúp bạn, thao tác thành thục hơn hẳn việc tự xử lý.`;
+    r.stats.sanity = (r.stats.sanity ?? 0) + 2;
+    r.stats.infection = (r.stats.infection ?? 0) - 5;
+  }
+  if (ch.consumeFood && !applyEating(r, inv, ch.consumeFood, ch.foodMult ?? 1)) return failMissing('routine', 'thức ăn');
+  if (ch.drink && !applyDrinking(r, inv)) r.outcome += ' Nhưng bình nước đã trống trơn.';
+  if (ch.go) withMove(r, setting, zone, ch.go);
   r.deterministic = true;
   return r;
 }
 
-// Hành động người chơi tự nhập: kiểm tra chéo vật phẩm, nếu thiếu thì thất bại.
+// ---------- Hành động tự nhập: phân tích ý định rồi tạo diễn biến mới ----------
 const ITEM_KEYWORDS: { act: RegExp; have: RegExp; label: string }[] = [
   { act: /\b(bắn|bóp cò|nổ súng)\b|súng|colt|shotgun|\bak\b/i, have: /súng|colt|shotgun|\bak\b/i, label: 'khẩu súng' },
   { act: /molotov|chai cháy/i, have: /molotov/i, label: 'chai cháy Molotov' },
@@ -438,45 +584,156 @@ const ITEM_KEYWORDS: { act: RegExp; have: RegExp; label: string }[] = [
   { act: /sát trùng|cồn/i, have: /cồn|povidone/i, label: 'cồn sát trùng' },
 ];
 
-function resolveCustom(action: string, inv: any[], rng: Rng): ChosenResolution {
+const PLACE_HINTS: { re: RegExp; table: LootTableId; zone: Zone; label: string }[] = [
+  { re: /hiệu thuốc|quầy thuốc|nhà thuốc|tủ thuốc|thuốc men/, table: 'pharmacy', zone: 'outside', label: 'một quầy thuốc' },
+  { re: /(?<![\p{L}])(chợ|sạp)(?![\p{L}])/u, table: 'market', zone: 'outside', label: 'khu chợ bỏ hoang' },
+  { re: /vườn|rau dại|hái (quả|trái|rau)|ổi|chuối/, table: 'forage', zone: 'outside', label: 'một mảnh vườn bỏ hoang' },
+  { re: /(?<![\p{L}])(ao|hồ)(?![\p{L}])|câu cá|bắt cá|bắt tôm/u, table: 'pond', zone: 'outside', label: 'bờ ao gần đó' },
+  { re: /(?<![\p{L}])xe(?![\p{L}])|ô tô|cốp xe/u, table: 'vehicle', zone: 'outside', label: 'một chiếc xe bỏ hoang' },
+  { re: /kim khí|đồ nghề|ốc vít|dụng cụ/, table: 'hardware', zone: 'outside', label: 'một tiệm kim khí' },
+  { re: /nhà kho|(?<![\p{L}])kho(?![\p{L}])|kho hàng/u, table: 'warehouse', zone: 'outside', label: 'một nhà kho' },
+  { re: /hứng nước|nước mưa|bồn nước|thùng nước/, table: 'water_raw', zone: 'roof', label: 'chỗ có nước mưa' },
+];
+
+// Ranh giới từ theo Unicode: \b của JS không hiểu tiếng Việt ("xuống" chứa "uống", "đồ ăn" chứa "ăn"...).
+const W = (alt: string) => new RegExp('(?<![\\p{L}])(?:' + alt + ')(?![\\p{L}])', 'u');
+
+function detectDestination(a: string, hasRoof: boolean): Zone | null {
+  if (/sân thượng|lên mái|lên nóc|leo lên (mái|nóc)/.test(a)) return hasRoof ? 'roof' : null;
+  if (/quay (về|lại|vào)|trở (về|lại)|về (phòng|chỗ|nhà|căn hộ|kho|cabin|xe|toa)|vào trong|trốn (vào|trong)/.test(a)) return 'shelter';
+  if (/(xuống|ra) (đường|phố|ngoài đường)|tầng trệt|tầng 1\b|sảnh|ra khỏi (tòa|nhà|siêu thị|trạm|toa)|ra đường|đi ra ngoài|ra ngoài/.test(a)) return 'outside';
+  if (/hành lang|cầu thang|ra khỏi phòng|mở cửa|sang phòng|phòng bên cạnh/.test(a)) return 'near';
+  return null;
+}
+
+function matchInvItem(inv: any[], a: string, pred: (i: any) => boolean): any | undefined {
+  let best: any; let bestScore = 0;
+  for (const it of inv) {
+    if (!pred(it) || (it.quantity ?? 1) <= 0) continue;
+    const words = String(it.name || '').toLowerCase().split(/[\s()/,]+/).filter((w) => w.length >= 2 && !/^(đồ|hộp|gói|chai|túi|bình|con|quả|củ|bó|lon|của|và|có)$/.test(w));
+    const score = words.filter((w) => a.includes(w)).length;
+    if (score > bestScore) { best = it; bestScore = score; }
+  }
+  return best;
+}
+
+function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setting: Setting, zone: Zone, turn: number, req: any): ChosenResolution {
   const a = action.toLowerCase();
   for (const k of ITEM_KEYWORDS) {
     if (k.act.test(a) && !hasItem(inv, k.have)) return failMissing('custom', k.label);
   }
-  const r = blankRes('custom', '');
-  if (/phá khóa|loot kỹ|lục soát|tìm kiếm|vật liệu|thu gom/.test(a)) {
-    if (rng() < 0.55) {
-      r.outcome = `Bạn thực hiện: "${action}". Sau một hồi mò mẫm cẩn thận trong đống đổ nát, bạn tìm được vài thứ còn dùng được. Tiếng động đủ nhỏ để không ai chú ý.`;
-      r.gain = toItems([{ id: 'cu_food', name: 'Đồ hộp thịt lợn hầm (Nguyên seal)', category: 'food', quantity: 1, hungerReduce: 35, isSealed: true, canSpoil: false, rarity: 'common', description: 'Đồ hộp quân đội nguyên niêm phong.' }]);
-      r.stats = { stamina: -6 };
-    } else {
-      r.outcome = `Bạn thực hiện: "${action}". Cả khu vực đã bị vét sạch từ trước, bạn chỉ mất công và thể lực mà không thu được gì đáng kể.`;
-      r.stats = { stamina: -8, sanity: -2 };
-    }
-  } else if (/nấu|bếp|lửa|ăn/.test(a)) {
-    r.outcome = `Bạn thực hiện: "${action}". Hơi ấm của thức ăn chín lan trong người, tinh thần dịu xuống phần nào dù mùi thơm có thể bay xa.`;
-    r.stats = { hunger: -12, sanity: 3 };
-  } else if (/nghỉ|ngủ|chợp mắt/.test(a)) {
-    r.outcome = `Bạn thực hiện: "${action}". Cơ thể dần thả lỏng, dù tai vẫn luôn căng ra nghe ngóng mọi tiếng động.`;
-    r.stats = { stamina: 14, sanity: 2 };
-  } else if (/né|lách|trốn|chạy/.test(a)) {
-    r.outcome = `Bạn thực hiện: "${action}". Bạn di chuyển nhanh và gọn, tránh được rắc rối trước mắt nhưng thể lực tụt đi nhiều.`;
-    r.stats = { stamina: -10 };
-  } else {
-    r.outcome = `Bạn thực hiện: "${action}". Bạn tính toán từng bước thật thận trọng và tiết kiệm sức, không gây thêm động tĩnh.`;
-    r.stats = { stamina: -3 };
+  const r = blankRes('custom', `Bạn quyết định: "${action}".`);
+  r.stats = { stamina: -3 };
+  const parts: string[] = [];
+
+  // 1) Điểm đến: hướng đi nêu rõ, hoặc suy ra từ nơi cần tới (hiệu thuốc, chợ, vườn...)
+  const place = PLACE_HINTS.find((p) => p.re.test(a));
+  let dest = detectDestination(a, setting.hasRoof);
+  if (!dest && place && !(place.zone === 'roof' && !setting.hasRoof)) dest = place.zone;
+  let at: Zone = zone;
+  if (dest && dest !== zone) {
+    parts.push(moveText(setting, zone, dest));
+    at = dest;
+    r.zone = dest;
+    r.stats.stamina = (r.stats.stamina ?? 0) - (Math.abs(['shelter', 'near', 'outside'].indexOf(dest) - ['shelter', 'near', 'outside'].indexOf(zone)) || 1) * 3;
+  } else if (!dest && /sân thượng|lên mái/.test(a) && !setting.hasRoof) {
+    parts.push(`Ở ${setting.place} không có chỗ nào để lên cao hơn như vậy, bạn đành bỏ ý định.`);
   }
+
+  // 2) Ý định chính
+  const isCook = W('nấu|luộc|chiên|rang|nướng|đun|hầm').test(a);
+  const isEat = W('ăn|nhai|dùng bữa|nấu|luộc|chiên|nướng|hầm').test(a) && !W('tìm|kiếm|lục|nhặt').test(a.replace(/đồ ăn|thức ăn|thực phẩm/g, ''));
+  const isDrink = W('uống|nhấp nước|giải khát').test(a);
+  const isSearch = W('lục|tìm|kiếm|nhặt|moi|mò|lật|lấy|hái|câu|bắt|vơ|thu gom').test(a);
+
+  if (W('tên (anh|chị|cô|chú|bác|bạn|người|của)|hỏi tên|tên là gì|tên gì').test(a) && comps.some((c) => c.nameKnown === false)) {
+    const c = comps.find((x) => x.nameKnown === false);
+    r.stats.sanity = 2;
+    r.companionUpdates.push({ name: c.name, revealName: true, trustChange: 4, dialogue: `Tôi tên là ${realNameOf(c)}. Cảm ơn anh vì đã hỏi.` });
+    parts.push(`Bạn chậm rãi hỏi tên người đồng hành. Sau một lúc ngập ngừng, người đó cho bạn biết: "${realNameOf(c)}".`);
+  } else if (isEat) {
+    const preferred = matchInvItem(inv, a, (i) => i.category === 'food' && (i.hungerReduce ?? 0) > 0);
+    const tmp = blankRes('custom', '');
+    const ok = applyEating(tmp, inv, isCook ? 'cook' : 'ready', isCook ? 1.3 : 1, preferred);
+    if (!ok) return failMissing('custom', 'thức ăn');
+    parts.push(isCook ? 'Bạn nhóm bếp, nấu chín rồi ăn từ từ trong hơi ấm hiếm hoi.' : 'Bạn ăn nhanh, nhai kỹ để dạ dày không bị sốc.');
+    parts.push(tmp.outcome.trim());
+    r.stats.hunger = tmp.stats.hunger; r.stats.infection = tmp.stats.infection; r.stats.stamina = (r.stats.stamina ?? 0) + (tmp.stats.stamina ?? 0) + (isCook ? 4 : 1);
+    r.lose.push(...tmp.lose);
+  } else if (isDrink) {
+    const preferred = matchInvItem(inv, a, (i) => (i.thirstReduce ?? 0) > 0);
+    const tmp = blankRes('custom', '');
+    if (!applyDrinking(tmp, inv, preferred)) return failMissing('custom', 'nước uống');
+    parts.push('Bạn uống từng ngụm nhỏ, để nước thấm xuống cổ họng khô rát.');
+    parts.push(tmp.outcome.trim());
+    r.stats.thirst = tmp.stats.thirst; r.stats.infection = tmp.stats.infection; r.lose.push(...tmp.lose);
+  } else if (isSearch || place) {
+    let table: LootTableId | undefined = place?.table;
+    if (!table) {
+      table = at === 'shelter' ? 'household' : at === 'near' ? 'household' : at === 'roof' ? 'water_raw' : pickFrom<LootTableId>(['vehicle', 'market', 'forage', 'household'], rng);
+    }
+    const chance = at === 'shelter' ? 0.5 : 0.72;
+    const found = rng() < chance ? rollLoot(table, at === 'shelter' ? 1 : 2, rng) : [];
+    r.stats.stamina = (r.stats.stamina ?? 0) - 5;
+    if (found.length) {
+      r.gain = found;
+      parts.push(`Bạn lục tìm ${place ? place.label : 'khắp nơi'} thật cẩn thận và nhặt được: ${found.map((f) => `${f.name} x${f.quantity}`).join(', ')}.`);
+    } else {
+      parts.push(`Bạn lục tìm ${place ? place.label : 'khắp xung quanh'} một hồi lâu nhưng nơi này gần như đã bị vét sạch, bạn không thu được gì.`);
+      r.stats.sanity = (r.stats.sanity ?? 0) - 2;
+    }
+  } else if (W('nghỉ|ngủ|chợp mắt|nằm|thư giãn').test(a)) {
+    if (at === 'shelter') { r.stats.stamina = 16; r.stats.sanity = 3; parts.push('Bạn nằm xuống giữa chỗ trú quen thuộc, hơi thở dần đều lại, cơ thể dần thả lỏng dù tai vẫn ngóng mọi tiếng động.'); }
+    else { r.stats.stamina = 6; r.stats.sanity = -3; parts.push(`Bạn dựa lưng vào góc khuất ở ${setting.labels[at]} chợp mắt chốc lát. Không có gì chắc chắn, nên mỗi tiếng động đều khiến bạn giật mình.`); }
+  } else if (W('chặn|gia cố|chèn|rào|khóa|đóng cửa|dựng|nẹp').test(a)) {
+    r.stats.stamina = (r.stats.stamina ?? 0) - 6; r.stats.sanity = 3;
+    parts.push('Bạn dồn sức gia cố, chèn thêm đồ nặng và siết chặt từng điểm yếu. Không tuyệt đối an toàn nhưng chắc chắn hơn trước.');
+  } else if (W('băng bó|băng|sát trùng|rửa vết|chữa|xử lý vết').test(a) && req?.player?.wound?.hasOpenWound) {
+    const gauze = matchInvItem(inv, 'băng gạc cồn muối', (i) => i.category === 'medical');
+    if (!gauze) return failMissing('custom', 'vật tư y tế');
+    r.lose.push({ name: gauze.name, quantity: 1 }); r.woundChange = { healed: true }; r.stats.sanity = 2;
+    parts.push(`Bạn rửa vết thương rồi dùng ${gauze.name} xử lý cẩn thận. Cơn nóng rát dịu đi.`);
+  } else if (W('chế|ghép|lắp|làm (cái|bẫy|vũ khí)').test(a)) {
+    r.stats.stamina = (r.stats.stamina ?? 0) - 3; r.stats.sanity = 1;
+    parts.push('Bạn thử tháo lắp, ghép nối vật liệu trong tay. Muốn chế thứ gì chắc chắn, hãy dùng bàn Chế Tạo trong ba lô.');
+  } else if (W('nói|trò chuyện|hỏi|bắt chuyện|an ủi|chia sẻ|tâm sự').test(a) && comps.length) {
+    const c = comps[Math.floor(rng() * comps.length)];
+    r.stats.sanity = 4; r.companionUpdates.push({ name: c.name, trustChange: 3, dialogue: pickFrom(COMPANION_LINES, rng) });
+    parts.push(`Bạn ngồi xuống nói chuyện với ${c.name}. Cả hai bớt cô đơn đi đôi chút giữa tận thế.`);
+  } else if (W('quan sát|nhìn|nghe ngóng|canh|theo dõi|trinh sát|do thám').test(a)) {
+    r.stats.sanity = 1; r.stats.stamina = (r.stats.stamina ?? 0) - 1;
+    parts.push(`Bạn quan sát kỹ ${setting.labels[at]}. ${pickFrom(['Không có gì khác thường, chỉ có gió và tiếng kêu xa xa.', 'Có bóng người lê bước ở xa, chưa thấy dấu hiệu họ biết bạn ở đây.', 'Bạn nhận ra một vệt máu mới trên tường, nghĩa là mới có chuyện xảy ra không lâu.', 'Bạn nghe thấy tiếng gõ nhịp đều từ xa, có thể là người đang cầu cứu hoặc chỉ là gió làm đổ vật gì đó.'], rng)}`);
+  } else if (W('đánh|giết|tấn công|chém|đập|hạ gục').test(a)) {
+    const weapon = inv.find((i) => i.category === 'weapon');
+    const dmg = weapon ? 4 + Math.floor(rng() * 6) : 12 + Math.floor(rng() * 8);
+    r.stats.hp = -dmg; r.stats.stamina = (r.stats.stamina ?? 0) - 8; r.stats.sanity = -3;
+    parts.push(weapon ? `Bạn vung ${weapon.name} dứt khoát và hạ được kẻ địch, nhưng bị cào xước ở cánh tay.` : 'Không có vũ khí trong tay, bạn đánh trả bằng tay không và chịu thiệt hại đáng kể.');
+  } else if (W('trốn|nấp|ẩn|im lặng').test(a)) {
+    r.stats.sanity = 1; parts.push('Bạn nép vào chỗ khuất, nín thở và giữ im lặng tuyệt đối cho đến khi cảm giác nguy hiểm qua đi.');
+  } else if (W('chạy|vọt|lao|phi').test(a)) {
+    r.stats.stamina = (r.stats.stamina ?? 0) - 7; parts.push('Bạn chạy nhanh, bước chân dội lên nền gạch. Khoảng cách được rút ngắn, nhưng hơi thở thì đã gấp gáp.');
+  } else if (!dest) {
+    parts.push('Bạn tính toán từng bước thật thận trọng và tiết kiệm sức, không gây thêm động tĩnh.');
+  }
+
+  // 3) Ra ngoài mà hành động tự do thì có thể gặp rủi ro
+  if (at === 'outside' && rng() < 0.22) {
+    r.stats.hp = (r.stats.hp ?? 0) - (3 + Math.floor(rng() * 5)); r.stats.sanity = (r.stats.sanity ?? 0) - 3;
+    parts.push('Giữa chừng, một bóng đen lảo đảo bỗng xuất hiện từ khe tường. Bạn kịp né nhưng bị cào xước.');
+  }
+  r.outcome = `${r.outcome} ${parts.join(' ')}`.trim();
   r.deterministic = false;
   return r;
 }
 
 // ---------- Chọn cảnh kế tiếp ----------
-function buildCtx(req: any, nextDay: number, weather: WeatherType): SceneCtx {
+function buildCtx(req: any, nextDay: number, weather: WeatherType, zone: Zone, setting: Setting): SceneCtx {
   const comps: any[] = req.companions || [];
-  const loc = req.currentLocation || 'Khu nhà bỏ hoang';
+  const loc = req.currentLocation || setting.place;
   const baseType = req.base?.base_type || (loc.toLowerCase().includes('quân sự') ? 'Military Base' : 'Apartment');
+  const inv: any[] = req.player?.inventory || [];
   return {
-    day: nextDay, weather, location: loc,
+    day: nextDay, weather, zone, setting,
     waterCut: nextDay >= 7, blackout: nextDay >= 10,
     hasCompanion: comps.length > 0, companionName: comps[0]?.name || 'Đồng đội',
     baseType,
@@ -484,36 +741,74 @@ function buildCtx(req: any, nextDay: number, weather: WeatherType): SceneCtx {
     hunger: req.player?.stats?.hunger ?? 0,
     stamina: req.player?.stats?.stamina ?? 100,
     hasWound: !!req.player?.wound?.hasOpenWound,
+    hasRawFood: inv.some((i) => i.category === 'food' && i.needsCooking && !i.isCooked && (i.quantity ?? 1) > 0),
+    night: weather === 'night_dark',
+    flags: req.flags || [],
   };
 }
 
-const pickFrom = <T,>(arr: T[], rng: Rng): T => arr[Math.floor(rng() * arr.length)];
+function weightedPick<T>(items: { v: T; w: number }[], rng: Rng): T {
+  const total = items.reduce((s, x) => s + Math.max(0.01, x.w), 0);
+  let p = rng() * total;
+  for (const x of items) {
+    p -= Math.max(0.01, x.w);
+    if (p <= 0) return x.v;
+  }
+  return items[items.length - 1].v;
+}
 
-function eventScene(ev: RandomEvent, inv: any[], leadIn: string): NextScene {
+// Cho phép sự kiện/cột mốc xảy ra ở một số vùng; nếu đang đứng ngoài vùng đó thì phải di chuyển (có mô tả).
+const SCENE_ZONES: Record<string, Zone[]> = {
+  event_rescue_pharmacist: ['outside'], event_rescue_mechanic_shop: ['outside'], event_sewer_crawler_ambush: ['outside'],
+  event_raider_ambush_bridge: ['outside'], event_acid_rain_superstorm: ['shelter', 'near', 'outside', 'roof'],
+  event_horde_night: ['shelter', 'near', 'roof'], event_supply_drop: ['near', 'roof', 'outside'],
+  milestone_1_hospital: ['outside'], milestone_2_bloodwolf_raiders: ['outside'], milestone_3_bunker13_distress: ['shelter', 'near', 'roof'],
+  milestone_4_mutation_crisis: ['shelter', 'near'], milestone_5_final_evacuation: ['outside'],
+};
+
+function transition(id: string, zone: Zone, setting: Setting): { zone: Zone; lead: string } {
+  const allowed = SCENE_ZONES[id];
+  if (!allowed || allowed.includes(zone)) return { zone, lead: '' };
+  const target = allowed[0];
+  return { zone: target, lead: moveText(setting, zone, target) };
+}
+
+function eventScene(ev: RandomEvent, inv: any[], leadIn: string, zone: Zone, setting: Setting): NextScene {
+  const t = transition(ev.id, zone, setting);
   const choices = ev.choices.map((c) => {
     const miss = (CHOICE_REQUIREMENTS[c.id] || []).filter((q) => !hasItem(inv, q.re));
     return miss.length ? `${c.text} [Thiếu: ${miss.map((m) => m.label).join(', ')}]` : c.text;
   }) as [string, string, string];
   return {
-    id: ev.id, kind: 'event',
-    situation: `${ev.isEmergency ? '[TÌNH HUỐNG KHẨN CẤP THỜI GIAN THỰC]\n\n' : ''}${ev.title}\n\n${leadIn ? leadIn + ' ' : ''}${ev.description}`,
-    choices,
-    isEmergency: ev.isEmergency,
-    emergencySeconds: ev.emergencySeconds,
-    dangerLevel: ev.dangerLevel,
-    soundCue: ev.soundCue,
+    id: ev.id, kind: 'event', zone: t.zone,
+    situation: `${ev.isEmergency ? '[TÌNH HUỐNG KHẨN CẤP THỜI GIAN THỰC]\n\n' : ''}${ev.title}\n\n${t.lead ? t.lead + ' ' : ''}${leadIn ? leadIn + ' ' : ''}${ev.description}`,
+    choices, isEmergency: ev.isEmergency, emergencySeconds: ev.emergencySeconds,
+    dangerLevel: ev.dangerLevel, soundCue: ev.soundCue,
   };
 }
 
-function milestoneScene(id: string): NextScene {
+function milestoneScene(id: string, zone: Zone, setting: Setting): NextScene {
   const m = milestoneById(id)!;
+  const t = transition(id, zone, setting);
   return {
-    id, kind: 'milestone',
-    situation: `${m.title}\n\n${MS_LEAD_IN[id] || ''} ${m.description}\n\n${m.contextPrompt}`,
+    id, kind: 'milestone', zone: t.zone,
+    situation: `${m.title}\n\n${t.lead ? t.lead + ' ' : ''}${MS_LEAD_IN[id] || ''} ${m.description}\n\n${m.contextPrompt}`,
     choices: m.majorChoices.map((c) => c.label) as [string, string, string],
-    isEmergency: false,
-    dangerLevel: 4,
-    soundCue: 'heartbeat',
+    isEmergency: false, dangerLevel: 4, soundCue: 'heartbeat',
+  };
+}
+
+function strangerNextScene(spec: StrangerSpec, zone: Zone, setting: Setting): NextScene {
+  const sc = strangerScene(spec, setting);
+  const zones = strangerZones(spec);
+  let z: Zone = zone;
+  let lead = '';
+  if (!zones.includes(zone)) { z = zones[0]; lead = moveText(setting, zone, z); }
+  return {
+    id: sc.id, kind: 'event', zone: z,
+    situation: `${sc.title}\n\n${lead ? lead + ' ' : ''}${sc.situation}`,
+    choices: sc.choices as [string, string, string],
+    isEmergency: false, dangerLevel: 3, soundCue: 'heartbeat',
   };
 }
 
@@ -529,6 +824,7 @@ function randomEventChance(day: number, baseType: string, sinceSpecial: number):
 }
 
 export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
+  const setting = getSetting(req.settingId);
   const day = req.day || 1;
   const turn = req.turnCount || 1;
   const nextTurn = turn + 1;
@@ -536,6 +832,9 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
   const newDay = nextDay > day;
   const inv: any[] = req.player?.inventory || [];
   const comps: any[] = req.companions || [];
+  const seenBefore: Record<string, number> = req.seenBefore || {};
+  const awayTurns: number = req.awayTurns || 0;
+  const seenW = (id: string) => 1 / (1 + 0.7 * (seenBefore[id] || 0));
 
   const done: string[] = [...(req.doneSceneIds || [])];
   if (req.sceneId) done.push(req.sceneId);
@@ -549,7 +848,9 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
   if (!hadSpecialEver) sinceSpecial = done.length;
   const specialAllowed = nextTurn >= 4 && sinceSpecial >= 2;
 
-  const resolution = resolveAction(req, rng);
+  let zone: Zone = (req.zone as Zone) || 'shelter';
+  const resolution = resolveAction(req, rng, setting, zone, turn);
+  zone = resolution.zone ?? zone;
 
   // Thời tiết & dự báo: chỉ đổi khi sang ngày mới, và bám dự báo hôm trước (65%).
   let weather: WeatherType = req.weather || 'clear';
@@ -561,7 +862,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     forecast = makeForecast(weather, rng);
   }
 
-  const ctx = buildCtx(req, nextDay, weather);
+  const ctx = buildCtx(req, nextDay, weather, zone, setting);
 
   // Lên lịch sự kiện (báo trước qua radio, xảy ra vào ngày hôm sau).
   let pending: PendingEvent[] = (req.pendingEvents || []).map((p: PendingEvent) => ({ ...p }));
@@ -593,7 +894,6 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     }
   }
 
-  // Chọn cảnh kế tiếp theo thứ tự ưu tiên.
   let next: NextScene | null = null;
   let consumedPending: string | null = null;
   const finalDay = nextDay >= 30;
@@ -603,9 +903,8 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     for (let i = 0; i < STORY_MILESTONES.length; i++) {
       const m = STORY_MILESTONES[i];
       if (done.includes(m.id)) continue;
-      if (m.id === 'milestone_4_mutation_crisis' && comps.length === 0) continue; // không có đồng đội thì bỏ qua
-      // Cột mốc đầu tiên chưa xong là cột mốc duy nhất được xét; cột mốc 2 chờ lịch phát sóng radio.
-      if (!MS_VIA_PENDING.has(m.id) && nextDay >= MS_MIN_DAY[i]) next = milestoneScene(m.id);
+      if (m.id === 'milestone_4_mutation_crisis' && comps.length === 0) continue;
+      if (!MS_VIA_PENDING.has(m.id) && nextDay >= MS_MIN_DAY[i]) next = milestoneScene(m.id, zone, setting);
       break;
     }
     // 2) Sự kiện đã lên lịch đến hạn.
@@ -613,56 +912,73 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
       const due = pending.find((p) => p.dueDay <= nextDay);
       if (due) {
         consumedPending = due.id;
-        next = due.id.startsWith('milestone_') ? milestoneScene(due.id) : eventScene(eventById(due.id)!, inv, LEAD_IN[due.id] || '');
+        next = due.id.startsWith('milestone_') ? milestoneScene(due.id, zone, setting) : eventScene(eventById(due.id)!, inv, LEAD_IN[due.id] || '', zone, setting);
       }
     }
     // 3) Bão do dự báo ứng nghiệm.
     if (!next && newDay && weather === 'heavy_rain' && count('event_acid_rain_superstorm') < 3) {
-      next = eventScene(eventById('event_acid_rain_superstorm')!, inv, LEAD_IN.event_acid_rain_superstorm);
+      next = eventScene(eventById('event_acid_rain_superstorm')!, inv, LEAD_IN.event_acid_rain_superstorm, zone, setting);
     }
-    // 4) Sự kiện ngẫu nhiên có điều kiện (không còn bốc thăm 28% mỗi lượt như trước).
+    // 4) Sự kiện ngẫu nhiên: người lạ không rõ tên, hoặc sự kiện có sẵn (đã đủ điều kiện).
     if (!next && nextDay >= 2 && rng() < randomEventChance(nextDay, ctx.baseType, sinceSpecial)) {
-      const pool = RANDOM_EVENTS.filter((e) => {
-        const rule = EVENT_RULES[e.id];
-        if (!rule || rule.weatherOnly || rule.scheduled) return false;
-        if (nextDay < rule.minDay || count(e.id) >= rule.max) return false;
-        if (rule.needsDone && !done.includes(rule.needsDone)) return false;
-        if (rule.skipIfHas && comps.some((c) => (c.name || '').includes(rule.skipIfHas!))) return false;
-        return true;
-      });
-      if (pool.length) {
-        const ev = pickFrom(pool, rng);
-        next = eventScene(ev, inv, LEAD_IN[ev.id] || '');
+      const strangerCount = done.filter((d) => d.startsWith('stranger:')).length;
+      const canStranger = comps.length < 3 && strangerCount < 8;
+      if (canStranger && rng() < 0.6 * Math.max(0.35, seenW('stranger'))) {
+        next = strangerNextScene(rollStranger(rng, zone), zone, setting);
+      } else {
+        const pool = RANDOM_EVENTS.filter((e) => {
+          const rule = EVENT_RULES[e.id];
+          if (!rule || rule.weatherOnly || rule.scheduled) return false;
+          if (nextDay < rule.minDay || count(e.id) >= rule.max) return false;
+          if (rule.needsDone && !done.includes(rule.needsDone)) return false;
+          if (rule.skipIfHas && comps.some((c) => realNameOf(c).includes(rule.skipIfHas!))) return false;
+          if (e.survivorCandidate && comps.length >= 3) return false;
+          return true;
+        });
+        if (pool.length) {
+          const ev = weightedPick(pool.map((e) => ({ v: e, w: seenW(e.id) })), rng);
+          next = eventScene(ev, inv, LEAD_IN[ev.id] || '', zone, setting);
+        }
       }
     }
   }
 
   if (consumedPending) pending = pending.filter((p) => p.id !== consumedPending);
 
-  // 5) Cảnh thường theo nhu cầu / ngẫu nhiên, có cửa sổ chống lặp.
+  // 5) Cảnh thường theo vùng đang đứng, nhu cầu cấp bách và chống lặp (trong ván + giữa các ván).
   if (!next) {
+    const zoneNow = zone;
     const recent = done.slice(-5);
     const needRecent = done.slice(-4);
-    const eligible = ROUTINE_SCENES.filter((s) => !s.when || s.when(ctx));
+    const eligible = ROUTINE_SCENES.filter((s) => s.zones.includes(zoneNow) && (!s.only || s.only.includes(setting.id)) && (!s.when || s.when(ctx)));
+    const awayTooLong = zoneNow !== 'shelter' && (awayTurns >= 3 || ctx.stamina < 25);
+    const returns = eligible.filter((s) => /^r_(return_|roof_return)/.test(s.id));
     const urgent = eligible.filter((s) => s.need && s.need(ctx) && !needRecent.includes(s.id));
     const fresh = eligible.filter((s) => !recent.includes(s.id));
-    const scene = urgent.length ? pickFrom(urgent, rng) : fresh.length ? pickFrom(fresh, rng) : pickFrom(eligible.filter((s) => s.id !== done[done.length - 1]), rng);
+    let scene: RoutineScene;
+    if (awayTooLong && returns.length && !recent.slice(-2).includes(returns[0].id)) scene = returns[0];
+    else if (urgent.length) scene = weightedPick(urgent.map((s) => ({ v: s, w: seenW(s.id) })), rng);
+    else {
+      const pool = fresh.length ? fresh : eligible.filter((s) => s.id !== done[done.length - 1]);
+      const list = pool.length ? pool : eligible;
+      scene = weightedPick(list.map((s) => ({ v: s, w: (s.weight ?? 1) * seenW(s.id) * (/^r_(return_|roof_return)/.test(s.id) && awayTurns >= 2 ? 3 : 1) })), rng);
+    }
     const flavor = pickFrom(WEATHER_FLAVOR[weather], rng);
     const extra = ctx.blackout ? ' Cả thành phố chìm trong bóng tối đen đặc.' : ctx.waterCut ? ' Không khí khô ngột ngạt và đường ống nước đã cạn.' : '';
     next = {
-      id: scene.id, kind: 'routine',
-      situation: `Ngày ${nextDay} - ${ctx.location}.${extra}\n\n${flavor}\n\n${scene.situation(ctx)}`,
+      id: scene.id, kind: 'routine', zone: zoneNow,
+      situation: `Ngày ${nextDay} - ${locationText(setting, zoneNow)}.${extra}\n\n${flavor}\n\n${fill(scene.situation(ctx), setting)}`,
       choices: scene.choices.map((c) => {
         const miss = (c.requires || []).filter((q) => !hasItem(inv, q.re));
-        return miss.length ? `${c.text} [Thiếu: ${miss.map((m) => m.label).join(', ')}]` : c.text;
+        const t = fill(c.text, setting);
+        return miss.length ? `${t} [Thiếu: ${miss.map((m) => m.label).join(', ')}]` : t;
       }) as [string, string, string],
       isEmergency: false,
-      dangerLevel: Math.min(5, 2 + (ctx.blackout ? 1 : 0) + (weather === 'night_dark' ? 1 : 0)),
-      soundCue: scene.id === 'r_noise_next_room' ? 'zombie_growl' : 'loot',
+      dangerLevel: Math.min(5, 2 + (ctx.blackout ? 1 : 0) + (weather === 'night_dark' ? 1 : 0) + (zoneNow === 'outside' ? 1 : 0)),
+      soundCue: scene.id === 'r_noise_wall' ? 'zombie_growl' : 'loot',
     };
   }
 
-  // Cột mốc môi trường: chỉ công bố ĐÚNG MỘT LẦN khi sang ngày 7 / 10 (bản cũ lặp lại 3 lần).
   let systemNote: string | undefined;
   if (newDay && nextDay === 7) {
     next.situation = `[CỘT MỐC SINH TỬ NGÀY 7 - MẤT NƯỚC TOÀN ĐÔ THỊ]\nBạn mở van vòi nước trong góc nhà, chỉ nghe tiếng rít khô khốc của không khí và vài giọt cặn gỉ sét đỏ quạch. Nhà máy cấp nước thành phố đã ngừng hoạt động. Từ hôm nay, nước đóng chai và nước mưa là nguồn sống duy nhất.\n\n${next.situation}`;
@@ -674,7 +990,6 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     systemNote = 'CẢNH BÁO THỜI GIAN THỰC: Hành động khẩn cấp cần được quyết định ngay trước khi cạn giờ!';
   }
 
-  // Nếu sự kiện đến hạn xảy ra ngay lượt này, trigger tức thời; nếu không là trigger tương lai.
   let systemTrigger: string | null = triggers.length ? triggers.join(' || ') : null;
   const immediate = consumedPending === 'event_horde_night' ? 'Event: Horde Attack' : next.id === 'event_acid_rain_superstorm' ? 'Weather: Heavy Storm' : null;
   if (immediate) systemTrigger = [immediate, ...triggers].join(' || ');
@@ -697,6 +1012,9 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     waterCut: ctx.waterCut, blackout: ctx.blackout,
     needMap: newDay && !inv.some((i) => /băng|gạc|thuốc/i.test(i.name || '')),
     baseStats, recentChoices,
+    zone: next.zone, settingId: setting.id,
+    location: locationText(setting, next.zone),
+    awayTurns: next.zone === 'shelter' ? 0 : awayTurns + 1,
   };
 }
 
@@ -705,7 +1023,6 @@ export function mergeStats(base: SceneStats, extra: SceneStats, weather: Weather
   (['hp', 'hunger', 'thirst', 'infection', 'sanity', 'stamina'] as const).forEach((k) => {
     total[k] = (base[k] ?? 0) + (extra[k] ?? 0);
   });
-  // Hao hụt cơ bản chịu ảnh hưởng thời tiết, phần thưởng/hồi phục từ hành động thì không.
   const weathered = applyWeatherToStats(base, weather);
   total.thirst = (weathered.thirst ?? 0) + (extra.thirst ?? 0);
   total.stamina = (weathered.stamina ?? 0) + (extra.stamina ?? 0);
@@ -722,6 +1039,19 @@ export function companionUpdatesFor(req: any, plan: TurnPlan, rng: Rng = Math.ra
   return updates;
 }
 
+// Cảnh mở đầu: chọn ngẫu nhiên 1 trong 4 bộ lựa chọn (ưu tiên bộ ít gặp ở các ván trước).
+export function openingScene(settingId: string | undefined, seenBefore: Record<string, number> = {}, rng: Rng = Math.random) {
+  const setting = getSetting(settingId);
+  const idx = weightedPick(OPENING_SETS.map((_, i) => ({ v: i, w: 1 / (1 + 0.7 * (seenBefore[`r_start:${i}`] || 0)) })), rng);
+  return {
+    sceneId: `r_start:${idx}`,
+    choices: OPENING_SETS[idx].map((c) => fill(c.text, setting)) as [string, string, string],
+    zone: 'shelter' as Zone,
+    location: locationText(setting, 'shelter'),
+    settingId: setting.id,
+  };
+}
+
 // ---------- Kết xuất phản hồi offline (không có Gemini) ----------
 export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.random) {
   const r = plan.resolution;
@@ -732,9 +1062,11 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
     situation: plan.next.situation,
     choices: plan.next.choices,
     scene_id: plan.next.id,
+    zone: plan.zone,
+    awayTurns: plan.awayTurns,
     customChoiceAllowed: true,
     dangerLevel: plan.next.dangerLevel,
-    location: req.currentLocation || 'Khu nhà bỏ hoang',
+    location: plan.location,
     weather: plan.weather,
     tomorrowForecast: plan.forecast,
     isEmergency: plan.next.isEmergency,
@@ -744,6 +1076,8 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
     system_trigger: plan.systemTrigger,
     radio_transmission: plan.radio,
     pending_events: plan.pending,
+    flags_add: r.flags || [],
+    flags_remove: r.flagsRemove || [],
     statChanges: total,
     weatherApplied: true,
     woundChange: r.woundChange || null,
@@ -758,7 +1092,7 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
       ? {
           is_game_over: false,
           is_victory: true,
-          epilogue: r.ending?.epilogue || `Bạn đã sống sót qua ${plan.nextDay} ngày khốc liệt. Căn cứ nhỏ của bạn vẫn đứng vững giữa thành phố chết, và những người còn lại cùng bạn đón ánh bình minh đầu tiên không còn tiếng rên của lũ quái vật.`,
+          epilogue: r.ending?.epilogue || `Bạn đã sống sót qua ${plan.nextDay} ngày khốc liệt. Chỗ trú nhỏ của bạn vẫn đứng vững giữa thành phố chết, và những người còn lại cùng bạn đón ánh bình minh đầu tiên không còn tiếng rên của lũ quái vật.`,
         }
       : undefined,
     soundCue: plan.next.soundCue,
