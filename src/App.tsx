@@ -1901,11 +1901,6 @@ export default function App() {
             <RadioBroadcast key={`radio-${currentTurn.turnNumber}`} text={currentTurn.radio_transmission} />
           )}
 
-          {/* Bản tin radio (chỉ hiện khi có thông tin về tương lai) */}
-          {currentTurn?.radio_transmission && (
-            <RadioBroadcast key={`radio-${currentTurn.turnNumber}`} text={currentTurn.radio_transmission} />
-          )}
-
           {/* Story Narrative & Outcome Card (Smooth, stable, clear reading experience) */}
           <main className="flex-1 bg-neutral-900/90 border border-neutral-800 rounded-xl p-5 sm:p-7 backdrop-blur-md shadow-2xl flex flex-col justify-between mb-4">
             <div className="space-y-5">
