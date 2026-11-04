@@ -138,6 +138,7 @@ export interface Companion {
   joinedTurn?: number;   // Lượt gia nhập (để tính lúc lộ tên)
   assignment?: string;   // Vai trò được giao: guard | cook | scout | repair | medic | forage | rest
   askedPlayerName?: boolean; // Đã hỏi tên người chơi chưa
+  traits?: string[];     // Tính cách riêng: brave, coward, greedy, loyal, jealous, kind, hot_tempered
 }
 
 export interface PlayerCharacter {
@@ -227,6 +228,7 @@ export interface StoryTurn {
     incubationTick?: boolean;
     statusChange?: 'healthy' | 'injured' | 'infected' | 'exhausted' | 'unconscious' | 'deceased';
     dialogue?: string;
+    leave?: boolean;
   }[];
   newCompanion?: Companion; // Chỉ xuất hiện sau hành động cứu hộ cụ thể
   newSkill?: {

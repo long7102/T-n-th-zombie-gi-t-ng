@@ -129,6 +129,16 @@ export function strangerScene(s: StrangerSpec, setting: Setting) {
   };
 }
 
+const TRAIT_POOL = ['brave', 'coward', 'greedy', 'loyal', 'jealous', 'kind', 'hot_tempered'];
+// Hai tính cách ổn định theo hạt giống của người lạ (không mâu thuẫn nhau)
+function traitsFor(s: StrangerSpec): string[] {
+  const a = TRAIT_POOL[(s.n + s.a) % TRAIT_POOL.length];
+  let b = TRAIT_POOL[(s.n * 3 + s.l + 1) % TRAIT_POOL.length];
+  const clash: Record<string, string> = { brave: 'coward', coward: 'brave', loyal: 'greedy', greedy: 'loyal' };
+  if (b === a || clash[a] === b) b = 'kind';
+  return a === b ? [a] : [a, b];
+}
+
 export function makeStrangerCompanion(s: StrangerSpec, turn: number, trustBonus: number, infected = false): Companion {
   const id = identity(s);
   const hp = 60 + (s.n % 30);
@@ -155,6 +165,7 @@ export function makeStrangerCompanion(s: StrangerSpec, turn: number, trustBonus:
       ? { isInfected: true, incubationTurns: 0, stage: 'hidden', isQuarantined: false, isTreated: false, secretBiteLocation: 'Vết cắn giấu dưới tay áo trái' }
       : { isInfected: false, incubationTurns: 0, stage: 'none', isQuarantined: false, isTreated: false },
     skills: id.arch.skills,
+    traits: traitsFor(s),
     equipment: id.arch.equipment,
     lastComment: 'Cảm ơn... tôi sẽ không làm gánh nặng cho anh đâu.',
     hasBeenRescued: true,

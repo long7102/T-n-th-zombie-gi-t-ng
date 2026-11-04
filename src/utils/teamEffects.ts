@@ -14,8 +14,12 @@ export interface TeamResult {
   companionDelta: Record<string, { morale?: number; hp?: number }>;
 }
 
-export function computeTeamEffects(companions: Companion[], hasBase: boolean, hasWound: boolean, rng: () => number = Math.random): TeamResult {
+export function computeTeamEffects(companions: Companion[], hasBase: boolean, hasWound: boolean, flags: string[] = [], rng: () => number = Math.random): TeamResult {
   const out: TeamResult = { sanity: 0, hunger: 0, infection: 0, fortification: 0, loot: [], log: [], companionDelta: {} };
+  if (flags.includes('pet_dog')) {
+    out.sanity += 1;
+    out.log.push(rng() < 0.4 ? 'Con chó hoang sủa gắt về phía cầu thang rồi im bặt: nó vừa báo động một thứ gì đó lảng vảng ngoài kia.' : 'Con chó nằm cuộn dưới chân cửa, tai vẫn vểnh lên canh gác.');
+  }
   for (const c of companions) {
     const role = (c.assignment || 'none') as RoleId;
     if (role === 'none' || c.status === 'deceased' || c.status === 'unconscious') continue;

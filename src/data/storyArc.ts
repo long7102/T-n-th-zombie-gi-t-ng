@@ -47,6 +47,14 @@ export const FLAG_TEXT: Record<string, string> = {
   rival_hostile: 'Có thù với nhóm Đội Cây Cầu',
   building_secured: 'Đã quét sạch và làm chủ cả tòa nhà',
   clinic_breach: 'Đã phá được cổng cách ly của trạm y tế',
+  pet_dog: 'Đã nhận nuôi một chú chó hoang',
+  dog_refused: 'Đã xua con chó hoang đi',
+  companion_betrayed: 'Một đồng đội đã phản bội và bỏ đi cùng đồ của nhóm',
+  companion_sacrificed: 'Một đồng đội đã hy sinh để cả nhóm sống sót',
+  quest_family: 'Đã hứa giúp đồng đội tìm người thân thất lạc',
+  family_resolved: 'Câu chuyện người thân của đồng đội đã có hồi kết',
+  personal_story_done: 'Đã nghe câu chuyện quá khứ của một đồng đội',
+  jealousy_done: 'Đã giải quyết cơn ghen trong nhóm',
   evac_contact: 'Đã liên lạc được điểm sơ tán',
   sample_secured: 'Đã giữ được mẫu huyết thanh',
 };
@@ -73,6 +81,7 @@ export function computeQuests(s: QuestInput): Quest[] {
     { id: 'q_secure', title: 'Dựng một nơi trú ẩn đáng tin', desc: 'Lập căn cứ và gia cố đến ít nhất 60%.', progress: s.hasBase ? `Kiên cố ${s.fortification}%` : 'Chưa có căn cứ', done: s.hasBase && s.fortification >= 60, open: !(s.hasBase && s.fortification >= 60) },
     { id: 'q_evac', title: 'Liên lạc điểm sơ tán', desc: 'Dò tín hiệu quân đội và xác định điểm sơ tán cuối cùng.', progress: has('evac_contact') ? 'Đã liên lạc' : has('clue_4') ? 'Đã nghe tín hiệu, cần xác nhận' : 'Chưa nghe thấy gì', done: has('evac_contact'), open: has('clue_4') && !has('evac_contact') },
     { id: 'q_sample', title: 'Giữ lấy mẫu huyết thanh', desc: 'Tìm mẫu thuốc giải trước khi người khác lấy mất.', progress: has('sample_secured') ? 'Đã có mẫu' : has('clue_3') ? 'Biết công thức, cần mẫu vật' : 'Chưa biết cần gì', done: has('sample_secured'), open: has('clue_3') && !has('sample_secured') },
+    ...(has('quest_family') ? [{ id: 'q_family', title: 'Tìm người thân của đồng đội', desc: 'Bạn đã hứa giúp một đồng đội tìm lại người thân thất lạc từ đêm đầu tiên.', progress: has('family_resolved') ? 'Đã có hồi kết' : 'Đang lần theo dấu vết', done: has('family_resolved'), open: !has('family_resolved') }] : []),
     { id: 'q_rival', title: 'Giải quyết nhóm đối thủ', desc: 'Một nhóm người sống sót khác đang tranh giành nguồn tài nguyên với bạn.', progress: has('rival_allied') ? 'Đã liên minh' : has('rival_hostile') ? 'Đang thù địch' : has('rival_met') ? 'Đã gặp, chưa ngã ngũ' : 'Chưa gặp', done: has('rival_allied'), open: has('rival_met') && !has('rival_allied') },
   ];
   if (s.day >= 14 || clues >= 4) {
@@ -135,6 +144,9 @@ export function composeEnding(e: EndingInput): string {
   if (has('bloodwolf_nemesis')) lines.push('Huyết Lang vẫn còn đó, và chúng chưa quên bạn.');
   if (has('rival_allied')) lines.push('Đội Cây Cầu ở lại giữ phố, đúng như lời hứa.');
   if (has('rival_hostile')) lines.push('Đội Cây Cầu đã chiếm phố sau lưng bạn.');
+  if (has('companion_sacrificed')) lines.push('Người đã hy sinh để bạn sống sót chưa một ngày nào rời khỏi suy nghĩ của bạn.');
+  if (has('companion_betrayed')) lines.push('Người đã phản bội nhóm vẫn là một vết dao trong lòng bạn, dù bạn không rõ họ còn sống không.');
+  if (has('pet_dog')) lines.push('Chú chó hoang năm nào vẫn ngoắc đuôi chạy sau bạn trên con đường mới.');
   if (has('abandoned_stranger') || has('abandoned_survivor')) lines.push('Những người bạn bỏ lại trên đường đi theo bạn vào từng giấc mơ.');
 
   // Bí mật cốt lõi

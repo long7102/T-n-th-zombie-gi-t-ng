@@ -1,7 +1,7 @@
 import { Companion, Item, PendingEvent, WeatherForecast, WeatherType } from '../types/game';
 import { RANDOM_EVENTS, REALISTIC_SURVIVOR_ROSTER, RandomEvent } from './randomEvents';
 import { STORY_MILESTONES } from './storyBranches';
-import { OPENING_SETS, ROUTINE_SCENES, RoutineChoice, RoutineScene, SceneCtx, SceneStats, WEATHER_FLAVOR } from './scenes';
+import { OPENING_SETS, ROUTINE_SCENES, RoutineChoice, RoutineScene, SceneCtx, SceneStats, WEATHER_FLAVOR, CompView, TeamOp, selectCompanions } from './scenes';
 import { fill, getSetting, locationText, moveText, Setting, Zone } from './settings';
 import { LootTableId, rollLoot } from './lootTables';
 import { parseStrangerId, resolveStranger, rollStranger, strangerScene, strangerZones, StrangerSpec } from './strangers';
@@ -634,6 +634,17 @@ function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId:
     r.stats.sanity = (r.stats.sanity ?? 0) + 2;
     r.stats.infection = (r.stats.infection ?? 0) - 5;
   }
+  // Tác động lên đồng đội được chọn theo tiêu chí (ghen tuông, phản bội, hy sinh, tâm sự...)
+  const ops: TeamOp[] = ch.team ? (Array.isArray(ch.team) ? ch.team : [ch.team]) : [];
+  const views = comps.map(toView);
+  for (const op of ops) {
+    for (const tgt of selectCompanions(views, op.who)) {
+      r.companionUpdates.push({
+        name: tgt.name, trustChange: op.trust, affectionChange: op.affection, moraleChange: op.morale,
+        statusChange: op.die ? 'deceased' : undefined, leave: op.leave, dialogue: op.dialogue,
+      });
+    }
+  }
   if (ch.consumeFood && !applyEating(r, inv, ch.consumeFood, ch.foodMult ?? 1)) return failMissing('routine', 'thức ăn');
   if (ch.drink && !applyDrinking(r, inv)) r.outcome += ' Nhưng bình nước đã trống trơn.';
   if (ch.go === 'outside' && setting.id === 'clinic_containment' && !flags.includes('clinic_breach')) {
@@ -800,12 +811,15 @@ function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setti
 }
 
 // ---------- Chọn cảnh kế tiếp ----------
+const toView = (c: any): CompView => ({ id: c.id, name: c.name, trust: c.trust ?? 0, affection: c.affection ?? 0, morale: c.morale ?? 50, hp: c.hp ?? 100, traits: c.traits || [], intimacy: c.intimacyLevel || 'stranger', gender: c.gender || 'male', status: c.status || 'healthy' });
+
 function buildCtx(req: any, nextDay: number, weather: WeatherType, zone: Zone, setting: Setting): SceneCtx {
   const comps: any[] = req.companions || [];
   const loc = req.currentLocation || setting.place;
   const baseType = req.base?.base_type || (loc.toLowerCase().includes('quân sự') ? 'Military Base' : 'Apartment');
   const inv: any[] = req.player?.inventory || [];
   return {
+    comps: comps.map(toView),
     day: nextDay, weather, zone, setting,
     waterCut: nextDay >= 7, blackout: nextDay >= 10,
     hasCompanion: comps.length > 0, companionName: comps[0]?.name || 'Đồng đội',

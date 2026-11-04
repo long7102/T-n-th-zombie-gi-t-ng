@@ -29,7 +29,12 @@ export function roleFit(role: RoleId, companion: { role?: string; skills?: strin
   return /y tá|dược|bác sĩ/i.test(companion.role || '') && role === 'guard' ? 'poor' : 'ok';
 }
 
+export const TRAIT_LABEL: Record<string, string> = {
+  brave: 'Dũng cảm', coward: 'Nhát gan', greedy: 'Tham lam', loyal: 'Trung thành', jealous: 'Hay ghen', kind: 'Tốt bụng', hot_tempered: 'Nóng tính',
+};
+
 export interface ChatCompanion {
+  traits?: string[];
   name: string; realName?: string; nameKnown?: boolean; gender: 'male' | 'female'; age: number; role?: string;
   personality?: string; bio?: string; skills?: string[]; trust: number; affection: number; morale: number;
   intimacyLevel?: string; status?: string; assignment?: string; hp?: number;
@@ -288,7 +293,7 @@ export function buildChatPrompt(req: ChatReq): string {
 NHÂN VẬT CỦA BẠN:
 - Tên hiển thị: ${c.name}${c.nameKnown === false ? ` (tên thật là ${c.realName}, CHƯA nói cho người chơi biết)` : ''}
 - Giới tính: ${c.gender === 'female' ? 'nữ' : 'nam'}, ${c.age} tuổi, nghề: ${c.role || 'người sống sót'}
-- Tính cách: ${c.personality || 'bình thường'}; Tiểu sử: ${c.bio || ''}; Kỹ năng: ${(c.skills || []).join(', ')}
+- Tính cách: ${c.personality || 'bình thường'}; đặc điểm: ${(c.traits || []).map((x) => TRAIT_LABEL[x] || x).join(', ') || 'chưa rõ'}; Tiểu sử: ${c.bio || ''}; Kỹ năng: ${(c.skills || []).join(', ')}
 - Tin cậy ${c.trust}/100, thiện cảm ${c.affection}/100, tinh thần ${c.morale}/100, quan hệ: ${c.intimacyLevel || 'stranger'}
 - Đang được giao việc: ${c.assignment || 'chưa'}; Bối cảnh: ngày ${req.context?.day ?? 1}, ${req.context?.zoneLabel || ''}, thời tiết ${req.context?.weather || ''}
 

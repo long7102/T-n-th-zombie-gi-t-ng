@@ -554,7 +554,7 @@ export default function App() {
         infectionPenalty = 5;
       }
 
-      const team = computeTeamEffects(companions, base.hasBase, currentWound.hasOpenWound);
+      const team = computeTeamEffects(companions, base.hasBase, currentWound.hasOpenWound, worldFlags);
       const bt = tickBase(base, (data.weather || weather) as WeatherType, turnCount + 1);
       const effectiveMaxHp = lockedMaxHp || player.stats.maxHp;
       const nextHp = Math.max(0, Math.min(effectiveMaxHp, player.stats.hp + (data.statChanges?.hp || 0)));
@@ -719,6 +719,17 @@ export default function App() {
         setRecentCompanionBanner(data.newCompanion);
         setTimeout(() => setRecentCompanionBanner(null), 6000);
       }
+      // Đồng đội bỏ đi (phản bội, bỏ nhóm) rời khỏi danh sách; người hy sinh được đánh dấu đã mất
+      {
+        const leaving = (data.companionUpdates || []).filter((u: any) => u.leave).map((u: any) => u.name);
+        if (leaving.length) {
+          updatedCompanions = updatedCompanions.filter((c) => !leaving.includes(c.name));
+          setWorldLog((prev) => [...prev, { day: nextDay, turn: nextTurnNum, kind: 'relation' as const, text: `Một đồng đội đã rời nhóm: ${leaving.join(', ')}` }].slice(-60));
+        }
+        const died = (data.companionUpdates || []).filter((u: any) => u.statusChange === 'deceased').map((u: any) => u.name);
+        if (died.length) setWorldLog((prev) => [...prev, { day: nextDay, turn: nextTurnNum, kind: 'relation' as const, text: `Đã mất: ${died.join(', ')}` }].slice(-60));
+      }
+
       // Người mới chưa biết tên: lộ tên khi đủ tin tưởng hoặc sau vài lượt đồng hành.
       updatedCompanions = updatedCompanions.map((c) => {
         if (c.nameKnown === false && c.realName && (c.trust >= 60 || turnCount + 1 - (c.joinedTurn ?? turnCount + 1) >= 5)) {

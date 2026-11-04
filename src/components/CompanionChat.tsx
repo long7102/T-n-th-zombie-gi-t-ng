@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Send, Heart, Shield, Smile, Loader2 } from 'lucide-react';
 import { Companion } from '../types/game';
-import { ROLES, RoleId, roleFit } from '../data/companionChat';
+import { ROLES, RoleId, roleFit, TRAIT_LABEL } from '../data/companionChat';
 import { sound } from '../utils/audio';
 
 export interface ChatMsg {
@@ -68,6 +68,11 @@ export const CompanionChat: React.FC<Props> = ({ companion, playerGender, player
                 <span className="flex items-center gap-1"><Heart className="h-3 w-3 text-rose-400" />{MOOD_LABEL(companion.affection || 0)} {companion.affection || 0}</span>
                 <span className="flex items-center gap-1"><Smile className="h-3 w-3 text-amber-400" />Tinh thần {companion.morale}</span>
               </div>
+              {(companion.traits || []).length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {(companion.traits || []).map((tr) => (<span key={tr} className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-300">{TRAIT_LABEL[tr] || tr}</span>))}
+                </div>
+              )}
             </div>
           </div>
           <button onClick={onClose} className="cursor-pointer rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white" aria-label="Đóng">

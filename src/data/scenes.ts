@@ -11,7 +11,33 @@ import { CLUES } from './storyArc';
 // - Loot dùng bảng ngẫu nhiên (roll) nên mỗi lần chơi nhặt được đồ khác nhau.
 // ====================================================================
 
+export interface CompView {
+  id: string; name: string; trust: number; affection: number; morale: number; hp: number;
+  traits: string[]; intimacy: string; gender: string; status: string;
+}
+
+export type TeamWho = 'all' | 'lowest_trust' | 'highest_trust' | 'highest_affection' | 'greedy' | 'loyal' | 'romantic' | 'second_affection' | 'lowest_morale';
+export interface TeamOp { who: TeamWho; trust?: number; affection?: number; morale?: number; leave?: boolean; die?: boolean; dialogue?: string }
+
+// Chọn đồng đội theo tiêu chí; dùng chung cho điều kiện cảnh và xử lý lựa chọn nên không bao giờ lệch nhau.
+export function selectCompanions(comps: CompView[], who: TeamWho): CompView[] {
+  const alive = comps.filter((c) => c.status !== 'deceased');
+  const by = (f: (c: CompView) => number, dir: 1 | -1 = 1) => [...alive].sort((a, b) => dir * (f(b) - f(a)));
+  switch (who) {
+    case 'all': return alive;
+    case 'lowest_trust': return by((c) => c.trust, -1).slice(0, 1);
+    case 'highest_trust': return by((c) => c.trust).slice(0, 1);
+    case 'highest_affection': return by((c) => c.affection).slice(0, 1);
+    case 'lowest_morale': return by((c) => c.morale, -1).slice(0, 1);
+    case 'greedy': return alive.filter((c) => c.traits.includes('greedy')).slice(0, 1);
+    case 'loyal': return alive.filter((c) => c.traits.includes('loyal')).slice(0, 1);
+    case 'romantic': return alive.filter((c) => c.intimacy === 'romantic' || c.intimacy === 'soulmate').slice(0, 1);
+    case 'second_affection': return alive.filter((c) => !(c.intimacy === 'romantic' || c.intimacy === 'soulmate')).sort((a, b) => b.affection - a.affection).slice(0, 1);
+  }
+}
+
 export interface SceneCtx {
+  comps: CompView[];
   day: number;
   weather: WeatherType;
   zone: Zone;
@@ -50,6 +76,7 @@ export interface RoutineChoice {
   flags?: string[];             // hậu quả lâu dài của quyết định (ghi nhớ trong thế giới)
   flagsRemove?: string[];       // xóa các hậu quả đã được giải quyết
   dynFlags?: 'floor';           // cờ động: tầng chung cư đã quét sạch
+  team?: TeamOp | TeamOp[];     // tác động lên đồng đội được chọn theo tiêu chí
   lose?: { name: string; quantity: number }[];
   go?: Zone;                    // đổi vùng (director chèn câu di chuyển)
   inflictWound?: string;
@@ -263,7 +290,94 @@ const STORY_SCENES: RoutineScene[] = [
   },
 ];
 
+// ---------- Đời sống tổ đội: cãi vã, ghen tuông, phản bội, hy sinh, quá khứ riêng, chú chó ----------
+const nm = (c: SceneCtx, who: TeamWho) => selectCompanions(c.comps, who)[0]?.name || 'một người trong nhóm';
+
+const COMPANION_SCENES: RoutineScene[] = [
+  {
+    id: 'r_ration_dispute', zones: ['shelter'], primary: 'shelter', weight: 4,
+    when: (c) => c.comps.length >= 2 && c.hunger >= 45,
+    situation: (c) => nm(c, 'lowest_trust') + ' bất ngờ đập tay xuống bàn: "Tại sao phần của tôi lại ít hơn người khác?" Tiếng tranh cãi lan nhanh trong {shelter}. Thức ăn ít, lòng tin mỏng, và ai cũng đang đói.',
+    choices: [
+      { text: 'Chia đều khẩu phần cho tất cả, ai cũng như nhau', outcome: 'Bạn đặt từng phần xuống trước mặt mọi người, bằng nhau không thiếu một thìa. Căng thẳng dịu đi, dù không ai thật sự no.', stats: { hunger: 2, sanity: 1 }, team: { who: 'all', trust: 2, morale: 3 } },
+      { text: 'Ai làm nhiều thì được phần nhiều hơn, nói rõ quy tắc đó', outcome: 'Bạn nói thẳng quy tắc. Người làm nhiều gật đầu, kẻ ít làm cau mày. Công bằng theo kiểu khắc nghiệt, nhưng ít ra rõ ràng.', stats: { sanity: -1 }, team: [{ who: 'lowest_trust', trust: -6, morale: -4, dialogue: 'Rồi, tôi hiểu rồi. Cứ làm như vậy đi.' }, { who: 'highest_trust', trust: 3 }] },
+      { text: 'Nhường phần của mình cho người đang gắt gỏng để xoa dịu', outcome: 'Bạn đẩy bát của mình sang. Người kia sững lại, ánh mắt đổi khác. Bạn đói lả đi, nhưng cả nhóm im lặng nhìn bạn bằng ánh mắt khác.', stats: { hunger: 6, sanity: 2 }, team: [{ who: 'lowest_trust', trust: 8, affection: 2, dialogue: 'Tôi... xin lỗi. Tôi sẽ không nói thế nữa.' }, { who: 'all', trust: 2 }] },
+    ],
+  },
+  {
+    id: 'r_jealousy', zones: ['shelter'], primary: 'shelter', weight: 4,
+    when: (c) => !c.flags.includes('jealousy_done') && selectCompanions(c.comps, 'romantic').length > 0 && (selectCompanions(c.comps, 'second_affection')[0]?.affection ?? 0) >= 35,
+    situation: (c) => nm(c, 'romantic') + ' im lặng suốt buổi, ánh mắt cứ liếc về phía ' + nm(c, 'second_affection') + ' mỗi khi bạn nói chuyện với người ấy. Cuối cùng, trong lúc dọn đồ, cô/anh ấy nói thẳng: "Anh/chị có để ý đến người khác không?"',
+    choices: [
+      { text: 'Nắm tay, nói rằng người bạn chọn là họ và không ai khác', outcome: 'Bạn nói chậm và chắc. Gương mặt người kia dãn ra, nước mắt rơm rớm. Cả căn phòng im lặng, nhưng người còn lại cúi đầu, tự hiểu chỗ đứng của mình.', stats: { sanity: 3 }, flags: ['jealousy_done'], team: [{ who: 'romantic', affection: 6, trust: 4, morale: 6 }, { who: 'second_affection', affection: -6, trust: -2, morale: -4 }] },
+      { text: 'Giữ khoảng cách với người kia để tránh hiểu lầm', outcome: 'Bạn tránh nói chuyện riêng với người kia, và cả hai đều nhận ra sự thay đổi. Bầu không khí lạnh đi, nhưng ít nhất không còn ai ghen.', stats: { sanity: -2 }, flags: ['jealousy_done'], team: [{ who: 'second_affection', affection: -8, morale: -4, dialogue: 'Tôi hiểu rồi. Tôi sẽ không làm phiền.' }, { who: 'romantic', affection: 2 }] },
+      { text: 'Gọi cả hai ngồi lại, nói thẳng cảm nhận của mình với từng người', outcome: 'Cuộc nói chuyện khó chịu, có lúc chua chát. Nhưng khi kết thúc, không ai còn giấu gì trong lòng. Bạn mệt rã rời, nhưng nhóm vững hơn.', stats: { sanity: -3, stamina: -5 }, flags: ['jealousy_done'], team: [{ who: 'all', trust: 4 }] },
+    ],
+  },
+  {
+    id: 'r_betrayal', zones: ['shelter', 'near'], primary: 'shelter', weight: 5,
+    when: (c) => c.day >= 6 && !c.flags.includes('betrayal_done') && c.comps.some((x) => x.traits.includes('greedy') && x.trust < 40),
+    situation: (c) => 'Bạn tỉnh giấc giữa đêm, nghe tiếng sột soạt ở góc phòng. ' + nm(c, 'greedy') + ' đang nhét gọn thức ăn và nước vào ba lô riêng, tay vẫn nhìn về phía cửa. Có vẻ người đó định âm thầm rời đi, mang theo phần của cả nhóm.',
+    choices: [
+      { text: 'Bật đèn, chặn cửa và vạch mặt ngay tại chỗ', outcome: 'Bạn bật đèn, giọng lạnh như thép. Người kia chết lặng rồi giật lấy ba lô xô bạn ngã. Bạn mất một phần đồ, người đó biến mất vào bóng tối, và cả nhóm còn lại nhìn nhau trong im lặng.', stats: { hp: -4, sanity: -5 }, lose: [{ name: 'Đồ hộp', quantity: 1 }], flags: ['betrayal_done', 'companion_betrayed'], team: { who: 'greedy', leave: true } },
+      { text: 'Giả vờ không thấy, để họ đi rồi nói chuyện với phần còn lại', outcome: 'Bạn nhắm mắt, nghe tiếng chân rón rén xa dần. Sáng ra bạn kể cho cả nhóm. Mất một người, nhưng không ai bị đổ máu.', stats: { sanity: -3 }, lose: [{ name: 'Đồ hộp', quantity: 1 }], flags: ['betrayal_done', 'companion_betrayed'], team: [{ who: 'greedy', leave: true }, { who: 'all', trust: 2 }] },
+      { text: 'Gọi tên người đó khẽ, hỏi tại sao và đưa phần của họ để ở lại', outcome: 'Người kia đứng sững, rồi bật khóc. Họ kể mình sợ chết đói và sợ cả nhóm bỏ rơi mình. Bạn đưa họ phần của họ. Hôm đó, lần đầu tiên người ấy ăn mà không nhìn đi nơi khác.', stats: { sanity: 2, hunger: 3 }, flags: ['betrayal_done'], team: { who: 'greedy', trust: 14, morale: 8, dialogue: 'Tôi hứa. Tôi sẽ không làm thế nữa.' } },
+    ],
+  },
+  {
+    id: 'r_sacrifice', zones: ['shelter'], primary: 'shelter', weight: 5,
+    when: (c) => c.day >= 6 && !c.flags.includes('sacrifice_done') && c.comps.some((x) => x.traits.includes('loyal') && x.trust >= 65),
+    situation: (c) => 'Tiếng bầy zombie dồn dập ngoài cửa, những tấm chắn rạn nứt từng nhịp. ' + nm(c, 'loyal') + ' nắm chặt tay bạn: "Cả nhóm không thoát hết được đâu. Để tôi chặn chúng lại, các người chạy đi." Giọng người đó run, nhưng ánh mắt không hề lung lay.',
+    choices: [
+      { text: 'Chấp nhận. Họ ở lại giữ cửa để cả nhóm kịp thoát', outcome: 'Bạn siết chặt tay rồi quay đi. Phía sau, tiếng đồ gỗ đổ ầm và tiếng thét của người ở lại kéo dài mãi trong đầu bạn. Cả nhóm sống sót, nhưng không ai nói một lời trên đường chạy.', stats: { sanity: -14 }, flags: ['sacrifice_done', 'companion_sacrificed'], team: [{ who: 'loyal', die: true }, { who: 'all', morale: -10 }] },
+      { text: 'Từ chối. Ở lại chiến đấu bên cạnh nhau tới cùng', outcome: 'Bạn lắc đầu và cầm chặt vũ khí. Cả nhóm dồn lại một chỗ, chống cửa bằng cả thân mình. Trận chiến dữ dội kéo dài đến tận sáng, ai cũng thương tích, nhưng cuối cùng chính tình đồng đội đã giữ cửa.', stats: { hp: -14, stamina: -16, sanity: 3 }, flags: ['sacrifice_done'], team: [{ who: 'loyal', trust: 14, affection: 8, dialogue: 'Tôi sẽ không bao giờ quên chuyện này.' }, { who: 'all', morale: 5, trust: 4 }] },
+      { text: 'Ra lệnh rút lui cả nhóm bằng lối thoát hiểm, bỏ lại phần lớn đồ đạc', outcome: 'Bạn quát lệnh, kéo từng người ra khỏi cửa sau. Cả nhóm sống sót, nhưng bạn phải bỏ lại hầu hết đồ đạc, và người kia nhìn bạn bằng ánh mắt khó đoán.', stats: { sanity: -4, stamina: -10 }, lose: [{ name: 'Gạo', quantity: 1 }, { name: 'Đồ hộp', quantity: 1 }], flags: ['sacrifice_done'], team: { who: 'loyal', trust: -3 } },
+    ],
+  },
+  {
+    id: 'r_personal_story', zones: ['shelter'], primary: 'shelter', weight: 3,
+    when: (c) => !c.flags.includes('personal_story_done') && c.comps.some((x) => x.trust >= 60),
+    situation: (c) => 'Đêm khuya, ' + nm(c, 'highest_trust') + ' ngồi một mình bên cửa sổ, cầm một mảnh ảnh nhàu nát. Khi bạn lại gần, người đó thì thầm: "Tôi chưa kể với ai chuyện này..." Có vẻ người ấy đang nghĩ đến người thân đã thất lạc.',
+    choices: [
+      { text: 'Ngồi xuống, im lặng lắng nghe cho tới khi người đó nói hết', outcome: 'Người đó kể về một người em gái thất lạc trong đêm đầu tiên của tận thế. Không ai nói gì thêm, nhưng có một sợi dây vô hình vừa siết lại giữa hai người.', stats: { sanity: 3, stamina: -2 }, flags: ['personal_story_done'], team: { who: 'highest_trust', trust: 6, affection: 3, morale: 6 } },
+      { text: 'Hứa sẽ cùng đi tìm người thân của họ khi có cơ hội', outcome: 'Mắt người đó sáng lên rồi rưng rưng. Bạn vừa nhận một lời hứa nặng nề, nhưng cũng vừa cho người ấy một lý do để sống tiếp.', stats: { sanity: 2 }, flags: ['personal_story_done', 'quest_family'], team: { who: 'highest_trust', trust: 10, affection: 4, morale: 10, dialogue: 'Cảm ơn bạn. Tôi sẽ đi cùng bạn đến cùng.' } },
+      { text: 'Nói nhẹ nhàng là quá khứ đã qua, giờ cần tập trung sống sót', outcome: 'Người đó gật đầu, cất mảnh ảnh vào túi. Có điều gì đó trong ánh mắt người ấy đóng lại.', stats: { sanity: -1 }, flags: ['personal_story_done'], team: { who: 'highest_trust', trust: -2, morale: -4 } },
+    ],
+  },
+  {
+    id: 'r_family_trace', zones: ['outside', 'near'], primary: 'outside', weight: 4,
+    when: (c) => c.flags.includes('quest_family') && !c.flags.includes('family_resolved') && c.day >= 8,
+    situation: () => 'Trên một bức tường ở {outside}, bạn thấy dòng chữ phấn nguệch ngoạc, gần giống với những gì người đồng đội đã kể: một tên người, một mũi tên và dòng chữ "Còn sống". Có thể đây là dấu vết của người họ đang tìm.',
+    choices: [
+      { text: 'Lần theo mũi tên, đi tìm bằng được', outcome: 'Bạn lần theo từng ký hiệu qua mấy con ngõ. Cuối cùng, trong một căn hầm, bạn thấy một người phụ nữ ốm yếu. Người đó đúng là em gái của đồng đội bạn, và họ đoàn tụ trong nước mắt.', stats: { stamina: -12, sanity: 8 }, roll: [{ table: 'household', n: 2 }], flags: ['family_resolved'], team: { who: 'highest_trust', trust: 14, affection: 8, morale: 15, dialogue: 'Tôi nợ bạn cả mạng sống này.' } },
+      { text: 'Chép lại dòng chữ mang về cho đồng đội quyết định', outcome: 'Bạn chép lại cẩn thận rồi mang về. Đồng đội nhìn dòng chữ rất lâu, tự biết mình phải làm gì tiếp theo, và nhìn bạn đầy biết ơn.', stats: { sanity: 3 }, flags: ['family_resolved'], team: { who: 'highest_trust', trust: 6, morale: 8 } },
+      { text: 'Bỏ qua, quá nguy hiểm khi đi lang thang chỉ vì một dòng chữ', outcome: 'Bạn bước đi, và biết rằng đồng đội sẽ không bao giờ hay biết điều bạn đã thấy.', stats: { sanity: -2 }, flags: ['family_resolved'], team: { who: 'highest_trust', trust: -4 } },
+    ],
+  },
+  {
+    id: 'r_morale_crisis', zones: ['shelter'], primary: 'shelter', weight: 4,
+    when: (c) => c.comps.some((x) => x.morale < 25),
+    situation: (c) => nm(c, 'lowest_morale') + ' ngồi co ro trong góc, mắt thẫn thờ, không còn nghe ai nói gì. "Tôi không làm nổi nữa..." tiếng thì thầm cứ lặp đi lặp lại. Nếu để vậy, người đó có thể bỏ đi hoặc làm điều dại dột.',
+    choices: [
+      { text: 'Ngồi xuống ôm vai, ở bên cho tới khi người đó bình tĩnh lại', outcome: 'Bạn không nói nhiều, chỉ ở đó. Một lúc lâu sau, hơi thở của người kia dần đều lại, và người đó gật đầu rất khẽ.', stats: { stamina: -4, sanity: 2 }, team: { who: 'lowest_morale', morale: 14, trust: 4 } },
+      { text: 'Quát thẳng: tất cả đều khổ, ai cũng phải cố lên', outcome: 'Câu nói như tát nước lạnh. Người đó giật mình, tỉnh táo hơn, nhưng ánh mắt nhìn bạn đã khác.', stats: { sanity: -2 }, team: { who: 'lowest_morale', morale: 5, trust: -5 } },
+      { text: 'Giao một việc cụ thể để người đó có thứ mà bám vào', outcome: 'Bạn nhờ họ kiểm đếm đồ đạc. Việc nhỏ khiến đầu óc người ấy ngừng quay cuồng, và lần đầu tiên từ sáng, họ đứng dậy.', stats: { stamina: -2 }, team: { who: 'lowest_morale', morale: 9, trust: 3 } },
+    ],
+  },
+  {
+    id: 'r_stray_dog', zones: ['near', 'outside'], primary: 'near', weight: 3,
+    when: (c) => c.day >= 3 && !c.flags.includes('pet_dog') && !c.flags.includes('dog_refused'),
+    situation: () => 'Một con chó gầy trơ xương, bộ lông bết bùn, lảng vảng cách bạn vài bước ở {near}. Nó không sủa, chỉ nhìn bạn bằng đôi mắt nâu ướt. Trong tận thế, một sinh vật còn tin người đã là điều hiếm hoi, nhưng thêm một miệng ăn nghĩa là bớt lại thức ăn của mình.',
+    choices: [
+      { text: 'Chia cho nó một phần thức ăn và cho nó đi theo', outcome: 'Con chó ăn ngấu nghiến rồi lẽo đẽo theo sau bạn. Từ giờ, ban đêm có thêm một đôi tai thính canh cửa, và bạn bớt cô đơn hơn đôi chút.', stats: { sanity: 4 }, lose: [{ name: 'Đồ hộp', quantity: 1 }], flags: ['pet_dog'], team: { who: 'all', morale: 4 } },
+      { text: 'Để một ít thức ăn lại cho nó rồi đi tiếp một mình', outcome: 'Bạn đặt phần ăn xuống đất rồi quay đi. Con chó nhìn theo một lúc lâu, không đi theo. Bạn không biết mình có làm đúng không.', stats: { sanity: 1 } },
+      { text: 'Xua nó đi, không thể để thêm một miệng ăn', outcome: 'Bạn giậm chân xua nó. Con chó lùi lại, đuôi cụp xuống rồi biến mất sau góc đường. Hình ảnh đó theo bạn mãi.', stats: { sanity: -3 }, flags: ['dog_refused'] },
+    ],
+  },
+];
+
 export const ROUTINE_SCENES: RoutineScene[] = [
+  ...COMPANION_SCENES,
   ...STORY_SCENES,
   // ============ CHỖ TRÚ ============
   {
