@@ -70,6 +70,7 @@ import { SceneIllustration } from './components/SceneIllustration';
 import { encodeMapAction, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
 import { BaseHub } from './components/BaseHub';
 import { rq, addQty, fmtNamed, servingOf } from './data/units';
+import { FORTIFY_ACTIONS } from './utils/baseSystem';
 import { tickBase, payCost, MODULE_BY_ID, SHELTER_SUITABILITY, applyBaseDelta } from './utils/baseSystem';
 import { exposureOf } from './data/raid';
 import { getSetting } from './data/settings';
@@ -169,6 +170,7 @@ export default function App() {
 
   // Sự kiện đã lên lịch (được báo trước qua radio)
   const [pendingEvents, setPendingEvents] = useState<PendingEvent[]>([]);
+  const [pendingRecruit, setPendingRecruit] = useState<Companion | null>(null);
 
   // Bối cảnh khởi đầu & vùng đang đứng (chỗ trú / xung quanh / ngoài đường / sân thượng)
   const [settingId, setSettingId] = useState('apartment_survivors');
@@ -250,7 +252,7 @@ export default function App() {
       if (gamePhase === 'playing' && currentTurn && !isAiProcessing) {
         const snapshot = {
           player, base, companions, day, turnCount, location, weather, weatherLabel, tomorrowForecast,
-          backgroundEffect, dangerLevel, history: history.slice(-60), currentTurn, pendingEvents, visitedNodes, mapVisits,
+          backgroundEffect, dangerLevel, history: history.slice(-60), currentTurn, pendingEvents, pendingRecruit, visitedNodes, mapVisits,
           settingId, zone, awayTurns, worldFlags, outposts, vehicle, worldLog,
         };
         localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
@@ -283,6 +285,7 @@ export default function App() {
       setHistory(s.history || []);
       setCurrentTurn(s.currentTurn);
       setPendingEvents(s.pendingEvents || []);
+      setPendingRecruit(s.pendingRecruit || null);
       setVisitedNodes(s.visitedNodes || []);
       setMapVisits(s.mapVisits || {});
       setSettingId(s.settingId || 'apartment_survivors');
@@ -496,6 +499,7 @@ export default function App() {
           turnCount,
           tomorrowForecast,
           pendingEvents,
+          pendingRecruit,
           chosenAction: action,
           actionType,
           currentLocation: location,
@@ -589,7 +593,14 @@ export default function App() {
       // 3. Food Spoilage Progression
       const decayRate = data.weather === 'heatwave' ? 18 : 8;
 
+      const cityPower = day < 10;
       let updatedInventory = player.inventory.map((item) => {
+        // Đang ướp muối: đồ không hỏng trong lúc ướp, xong thì thành đồ khô bảo quản được lâu
+        if (item.curingTurns && item.curingTurns > 0) {
+          const left = item.curingTurns - 1;
+          if (left > 0) return { ...item, curingTurns: left };
+          return { ...item, curingTurns: 0, isDried: true, canSpoil: false, freshness: 100, name: item.name.replace(/ \(đang ướp muối\)$/, '') + ' (ướp muối)', description: `${item.description} (Đã ướp muối xong, để được rất lâu.)` };
+        }
         if (item.category === 'food' && item.canSpoil && !item.isSealed && !item.isDried) {
           const loss = item.isCooked ? Math.round(decayRate * 0.5) : decayRate;
           const newFreshness = Math.max(0, (item.freshness ?? 100) - loss);
@@ -603,6 +614,8 @@ export default function App() {
           if (bt.base.facilities.hasGeneratorAndFridge) {
             return item;
           }
+          // Tủ đông chỉ giữ lạnh khi còn điện (lưới thành phố hoặc máy phát)
+          if (item.frozen && cityPower) return item;
           const baseDecay = base.facilities.hasFoamBox ? Math.round(decayRate * 0.25) : Math.round(decayRate * 0.5);
           const newFreshness = Math.max(0, (item.freshness ?? 100) - baseDecay);
           return { ...item, freshness: newFreshness };
@@ -737,6 +750,7 @@ export default function App() {
       });
 
       // Conditional Companion Recruitment: Only if specifically rescued
+      if ('pending_recruit' in data) setPendingRecruit(data.pending_recruit || null);
       if (data.newCompanion && !updatedCompanions.some((c) => c.id === data.newCompanion.id)) {
         updatedCompanions.push({ ...data.newCompanion, hasBeenRescued: true, joinedTurn: turnCount + 1 });
         setRecentCompanionBanner(data.newCompanion);
@@ -959,23 +973,35 @@ export default function App() {
     setPlayer({ ...player, inventory: updatedInv });
   };
 
-  // Dry / Cure food
+  // Ướp muối: cần muối và mất vài lượt, đồ không hỏng trong lúc ướp
   const handleDryFood = (item: Item) => {
+    const salt = player.inventory.find((i) => /muối ăn|muối hạt|muối/i.test(i.name) && i.category !== 'medical' && i.quantity > 0);
+    if (!salt) { setLootNotifications(['Cần muối để ướp. Hãy tìm gói muối ăn trong bếp.']); return; }
     sound.playLoot();
-    const updatedInv = player.inventory.map((it) => {
-      if (it.id === item.id) {
-        return {
-          ...it,
-          name: `${it.name} (Sấy khô / Ướp muối)`,
-          isDried: true,
-          canSpoil: false,
-          freshness: 100,
-          description: `${it.description} (Đã ướp muối sấy khô, không bao giờ ôi thiu).`,
-        };
-      }
-      return it;
-    });
+    const curing = /thịt|cá|tôm|ốc|xúc xích|gà|heo|bò/i.test(item.name) ? 3 : 2;
+    const updatedInv = player.inventory
+      .map((it) => {
+        if (it.id === item.id) return { ...it, name: `${it.name} (đang ướp muối)`, curingTurns: curing, description: `${it.description} (Đang ướp muối, xong sau ${curing} lượt.)` };
+        if (it.id === salt.id) return { ...it, quantity: rq(it.quantity - 1) };
+        return it;
+      })
+      .filter((it) => it.quantity > 0);
     setPlayer({ ...player, inventory: updatedInv });
+    setLootNotifications([`Bắt đầu ướp muối ${item.name}: xong sau ${curing} lượt`]);
+  };
+
+  // Cất tủ đông trong căn cứ (cần có điện): đồ tươi không hỏng cho tới khi mất điện
+  const hasFreezerPower = base.hasBase && (base.facilities.hasGeneratorAndFridge || day < 10);
+  const handleFreezeFood = (item: Item) => {
+    if (!hasFreezerPower) { setLootNotifications(['Không có điện hoặc chưa có căn cứ để cất tủ đông.']); return; }
+    sound.playLoot();
+    const rest = player.inventory.filter((it) => it.id !== item.id);
+    const frozenItem: Item = { ...item, frozen: true, name: item.name.includes('(đông lạnh)') ? item.name : `${item.name} (đông lạnh)` };
+    const ex = base.warehouse.find((w) => w.name === frozenItem.name);
+    const warehouse = ex ? base.warehouse.map((w) => (w.id === ex.id ? { ...w, quantity: rq(w.quantity + item.quantity) } : w)) : [...base.warehouse, frozenItem];
+    setPlayer({ ...player, inventory: rest });
+    setBase({ ...base, warehouse });
+    setLootNotifications([`Đã cất ${item.name} vào tủ đông của căn cứ`]);
   };
 
   // Equip Item
@@ -1142,6 +1168,23 @@ export default function App() {
     });
   const pushLog = (kind: WorldEvent['kind'], text: string) => setWorldLog((prev) => [...prev, { day, turn: turnCount, kind, text }].slice(-60));
 
+  // Bỏ căn cứ hiện tại để chọn nơi khác: kho chuyển vào ba lô, công trình mất
+  const handleAbandonBase = () => {
+    sound.playClick();
+    const carried = base.warehouse.filter((i) => i.quantity > 0);
+    setPlayer((p) => {
+      const inv = p.inventory.map((i) => ({ ...i }));
+      for (const it of carried) {
+        const ex = inv.find((i) => i.name === it.name);
+        if (ex) ex.quantity = rq(ex.quantity + it.quantity); else inv.push({ ...it, frozen: false });
+      }
+      return { ...p, inventory: inv };
+    });
+    setBase({ hasBase: false, name: '', location: '', description: '', fortification: 0, warehouse: [], modules: {}, fuel: 0, fortified: [], facilities: { hasStove: false, hasFoamBox: false, hasGeneratorAndFridge: false, hasTripwireAlarms: false } });
+    pushLog('survival', 'Bỏ căn cứ cũ để tìm chỗ khác');
+    setLootNotifications(['Đã bỏ căn cứ. Hãy đi tìm chỗ khác trên bản đồ rồi chiếm làm căn cứ mới.']);
+  };
+
   // Lập căn cứ tại chỗ trú hiện tại
   const handleEstablishBase = () => {
     const st = getSetting(settingId);
@@ -1161,6 +1204,20 @@ export default function App() {
     setRecentBaseBanner(`Căn cứ ${st.place}`);
     setTimeout(() => setRecentBaseBanner(null), 6000);
     pushLog('survival', `Lập căn cứ tại ${st.labels.shelter}`);
+  };
+
+  // Gia cố chỗ ở: một việc cụ thể, làm một lần, tốn vật tư và sức
+  const handleFortify = (actionId: string) => {
+    const a = FORTIFY_ACTIONS.find((x) => x.id === actionId);
+    if (!a || (base.fortified || []).includes(a.id)) return;
+    const paid = payCost(a.cost, player.inventory, base.warehouse);
+    if (!paid) return;
+    sound.playLoot();
+    setPlayer({ ...player, inventory: paid.backpack, stats: { ...player.stats, stamina: Math.max(0, player.stats.stamina - a.stamina) } });
+    setBase({ ...base, warehouse: paid.warehouse, fortification: Math.min(100, base.fortification + a.gain), fortified: [...(base.fortified || []), a.id], facilities: { ...base.facilities, hasTripwireAlarms: base.facilities.hasTripwireAlarms || a.id === 'hall_alarm' || a.id === 'trap_entrance' } });
+    setRecentBaseBanner(a.name);
+    setTimeout(() => setRecentBaseBanner(null), 5000);
+    pushLog('survival', a.name);
   };
 
   // Xây hoặc nâng cấp một công trình: trừ vật tư (ba lô trước, rồi kho căn cứ)
@@ -1201,6 +1258,7 @@ export default function App() {
       fortification: 20 + (node.outpost!.bonus.walls || 0) * 15,
       base_type: node.outpost!.baseKind,
       baseNodeId: node.id,
+      fortified: [],
       modules: { ...node.outpost!.bonus },
       fuel: b.fuel || 0,
     }));
@@ -1254,8 +1312,8 @@ export default function App() {
   };
 
   // Gửi câu người chơi gõ cho đồng đội: AI (nếu còn khóa) hoặc engine offline trả lời, rồi cập nhật thiện cảm.
-  const handleSendChat = async (text: string) => {
-    const comp = companions.find((c) => c.id === chatCompanionId);
+  const handleSendChat = async (text: string, forId?: string) => {
+    const comp = companions.find((c) => c.id === (forId || chatCompanionId));
     if (!comp || chatBusy) return;
     const history = chatLogs[comp.id] || [];
     setChatLogs((prev) => ({ ...prev, [comp.id]: [...history, { from: 'player', text }] }));
@@ -1509,6 +1567,7 @@ export default function App() {
     setVisitedNodes([]);
     setMapVisits({});
     setPendingEvents([]);
+    setPendingRecruit(null);
     setZone('shelter');
     setAwayTurns(0);
     setWorldFlags([]);
@@ -2078,6 +2137,8 @@ export default function App() {
           onUseItem={handleUseItem}
           onCookFood={handleCookFood}
           onDryFood={handleDryFood}
+          onFreezeFood={handleFreezeFood}
+          canFreeze={hasFreezerPower}
           onEquipItem={handleEquipItem}
           onOpenCrafting={() => {
             setShowInventory(false);
@@ -2110,7 +2171,9 @@ export default function App() {
           placeName={getSetting(settingId).place}
           loopStatus={loopStatus}
           onEstablish={handleEstablishBase}
+          onAbandon={handleAbandonBase}
           onBuild={handleBuildModule}
+          onFortify={handleFortify}
           companions={companions}
           exposure={exposureOf({ base, flags: worldFlags, day, companionCount: companions.filter((c) => c.status !== 'deceased').length, hasVehicle: !!vehicle })}
           vehicle={vehicle}
@@ -2173,6 +2236,7 @@ export default function App() {
               hasSafeBase={zone === 'shelter' && !worldFlags.includes('raid_warned')}
               playerGender={player.gender}
               onOpenChat={(c) => { setShowCompanions(false); setChatCompanionId(c.id); }}
+              onQuickChat={(c, text) => { setShowCompanions(false); setChatCompanionId(c.id); void handleSendChat(text, c.id); }}
               onClose={() => setShowCompanions(false)}
             />
           </div>

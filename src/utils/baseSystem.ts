@@ -47,6 +47,59 @@ export const MODULES: ModuleDef[] = [
     cost: (n) => [L(/dây|lon|chuông|kẽm/i, 'Dây / chuông / lon', 1 + n), L(/thanh sắt|ván|thang|ống nhòm/i, 'Khung tháp', 1)] },
 ];
 
+// ====================================================================
+// GIA CỐ CHỖ Ở: các việc cụ thể theo đúng mối đe dọa của từng nơi (chung cư tầng cao thì lo cầu thang và cửa chính, không phải tầng thấp).
+// Mỗi việc làm một lần, tốn vật tư hoặc công sức; một số việc còn giúp căn cứ bớt lộ diện.
+// ====================================================================
+export interface FortifyAction {
+  id: string;
+  name: string;
+  icon: string;
+  desc: string;
+  gain: number;                 // cộng vào độ kiên cố (%)
+  stealth?: number;             // giảm điểm lộ diện
+  cost: CostLine[];
+  stamina: number;              // công sức bỏ ra
+  only?: string[];              // chỉ hợp với một số bối cảnh khởi đầu
+}
+
+export const FORTIFY_ACTIONS: FortifyAction[] = [
+  // Chung cư tầng cao: đường lên duy nhất là cầu thang bộ và thang máy, nên chặn ở đó
+  { id: 'block_stairwell', name: 'Chặn cầu thang bộ thoát hiểm', icon: '🪜', only: ['apartment_survivors'], gain: 12, stamina: 8, cost: [],
+    desc: 'Kéo tủ, bàn, tủ lạnh cũ chặn lối cầu thang ngay dưới tầng của bạn, chỉ chừa khe để chui qua. Đây là con đường duy nhất xác sống leo lên được.' },
+  { id: 'door_chain', name: 'Gia cố cửa chính và khóa chống cạy', icon: '🚪', only: ['apartment_survivors', 'private_house'], gain: 10, stamina: 5, cost: [{ re: /thanh sắt|ván|gỗ/i, label: 'Thanh sắt / ván gỗ', qty: 2 }, { re: /đinh|ốc vít|dây kẽm|dây thừng/i, label: 'Đinh / dây kẽm', qty: 1 }],
+    desc: 'Nẹp thanh sắt sau cánh cửa, thêm chốt và xích. Kẻ cướp mất nhiều thời gian hơn để phá.' },
+  { id: 'hall_alarm', name: 'Giăng dây chuông báo động ở hành lang', icon: '🔔', only: ['apartment_survivors', 'private_house', 'clinic_containment'], gain: 6, stamina: 3, cost: [{ re: /dây|lon|chuông|kẽm/i, label: 'Dây / lon / chuông', qty: 2 }],
+    desc: 'Dây căng ngang lối vào gắn lon rỗng: có ai đột nhập là bạn nghe ngay.' },
+  { id: 'fire_escape_rope', name: 'Buộc dây thoát hiểm từ ban công', icon: '🧗', only: ['apartment_survivors'], gain: 4, stamina: 4, cost: [{ re: /dây thừng|dây|vải/i, label: 'Dây thừng', qty: 1 }],
+    desc: 'Một đường lui nếu cầu thang thất thủ.' },
+  // Nhà riêng
+  { id: 'gate_wall', name: 'Nâng tường rào, gắn mảnh chai và dây thép gai', icon: '🧱', only: ['private_house'], gain: 12, stamina: 8, cost: [{ re: /thanh sắt|ván|gạch|dây kẽm|lưới/i, label: 'Vật liệu rào', qty: 3 }],
+    desc: 'Tường rào mỏng là điểm yếu lớn nhất của nhà riêng. Nâng cao và gắn vật nhọn để chặn kẻ trèo.' },
+  { id: 'cut_neighbor_roofs', name: 'Phá lối trèo sang nhà hàng xóm', icon: '✂️', only: ['private_house'], gain: 6, stamina: 6, cost: [],
+    desc: 'Cắt lan can, dỡ tấm bắc ngang để không ai theo đường mái nhà vào được.' },
+  // Siêu thị, trạm y tế
+  { id: 'shutter_lock', name: 'Khóa chặt cửa cuốn, hàn các khe hở', icon: '🛡️', only: ['supermarket_lockdown'], gain: 12, stamina: 6, cost: [{ re: /thanh sắt|dây xích|khóa|đinh/i, label: 'Xích / khóa / sắt', qty: 2 }],
+    desc: 'Cửa cuốn sắt là thứ chắc nhất ở đây, nhưng các khe hở và cửa kho phía sau thì chưa.' },
+  { id: 'seal_ward', name: 'Phong tỏa khu cách ly, đóng chặt cửa phòng bệnh', icon: '🧪', only: ['clinic_containment'], gain: 10, stamina: 6, cost: [{ re: /băng keo|bạt|nhựa|ván/i, label: 'Băng keo / bạt / ván', qty: 2 }],
+    desc: 'Chặn các phòng chứa người nhiễm, bịt kín khe cửa để mùi và tiếng không lọt ra.' },
+  // Chung cho mọi nơi
+  { id: 'barricade_furniture', name: 'Chồng đồ đạc nặng chặn lối vào phụ', icon: '🛋️', gain: 6, stamina: 7, cost: [],
+    desc: 'Tủ, giường, máy giặt đẩy sát cửa phụ và cửa sổ thấp. Không tốn vật tư nhưng mất sức.' },
+  { id: 'dim_light', name: 'Che kín cửa sổ, tắt mọi ánh sáng ban đêm', icon: '🌑', stealth: 6, gain: 3, stamina: 3, cost: [{ re: /chăn|vải|bạt|rèm|giấy|băng keo/i, label: 'Chăn / bạt / vải dày', qty: 2 }],
+    desc: 'Không ánh sáng lọt ra là không ai biết có người sống ở đây. Giảm mức lộ diện.' },
+  { id: 'hide_stock', name: 'Giấu vật tư vào chỗ kín, trộn lẫn với đồ bỏ đi', icon: '📦', stealth: 6, gain: 0, stamina: 5, cost: [],
+    desc: 'Đồ ăn nằm lộ liễu là mồi nhử. Chia nhỏ và giấu đi để kẻ vào cũng khó tìm.' },
+  { id: 'quiet_floor', name: 'Lót chăn dưới sàn, bọc chân ghế, giữ nhà im lặng', icon: '🤫', stealth: 4, gain: 0, stamina: 3, cost: [{ re: /chăn|vải|bạt|giẻ/i, label: 'Chăn / vải', qty: 1 }],
+    desc: 'Tiếng kéo ghế, bước chân vọng ra cầu thang là thứ thu hút lũ xác sống. Giảm tiếng động.' },
+  { id: 'trap_entrance', name: 'Đặt bẫy sau lối vào chính', icon: '🪤', gain: 8, stamina: 4, cost: [{ re: /dây|thanh sắt|đinh|kẽm|mảnh chai/i, label: 'Dây / đinh / sắt', qty: 2 }],
+    desc: 'Dây căng ngang bậc cửa, hố nông có cọc nhọn: ai vào cũng phải trả giá.' },
+];
+
+export function fortifyActionsFor(settingId: string): FortifyAction[] {
+  return FORTIFY_ACTIONS.filter((a) => !a.only || a.only.includes(settingId));
+}
+
 export const MODULE_BY_ID: Record<string, ModuleDef> = Object.fromEntries(MODULES.map((m) => [m.id, m]));
 
 export const lvl = (b: BaseCamp, id: string) => b.modules?.[id] || 0;

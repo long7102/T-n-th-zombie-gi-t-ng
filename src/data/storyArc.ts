@@ -29,6 +29,8 @@ export const FLAG_TEXT: Record<string, string> = {
   abandoned_stranger: 'Đã bỏ mặc một người lạ đang cần giúp',
   abandoned_survivor: 'Đã bỏ rơi một người sống sót',
   saved_stranger: 'Đã cứu một người lạ và nhận họ vào nhóm',
+  stair_alarm: 'Đã giăng dây báo động ở cầu thang bộ',
+  water_stored: 'Đã kịp xả nước trữ trước khi vòi cạn',
   killed_raiders: 'Đã đánh trả băng cướp',
   bloodwolf_nemesis: 'Huyết Lang trở thành kẻ thù của bạn',
   bloodwolf_neutral_tribute: 'Đã cống nạp cho Huyết Lang để qua cầu',

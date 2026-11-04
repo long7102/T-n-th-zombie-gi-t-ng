@@ -194,7 +194,7 @@ export function resolveRaid(mode: RaidMode, type: RaidType, i: RaidInput, rng: R
 // Căn cứ trông bình thường, im lìm thì không ai để ý. Chỉ khi nó nổi bật (tiếng máy phát, khói bếp,
 // kho đầy ắp, người đông, xe đậu, có kẻ thù theo dõi) thì mới có xác suất bị nhắm tới.
 export interface ExposureInput {
-  base: { fortification?: number; modules?: Record<string, number>; warehouse?: Item[]; facilities?: { hasGeneratorAndFridge?: boolean; hasStove?: boolean } };
+  base: { fortification?: number; modules?: Record<string, number>; warehouse?: Item[]; fortified?: string[]; facilities?: { hasGeneratorAndFridge?: boolean; hasStove?: boolean } };
   flags: string[];
   day: number;
   companionCount: number;
@@ -220,7 +220,9 @@ export function exposureOf(i: ExposureInput): Exposure {
   add('Băng Huyết Lang đang truy sát bạn', i.flags.includes('bloodwolf_nemesis') ? 28 : 0);
   add('Đội Cây Cầu đang thù bạn', i.flags.includes('rival_hostile') ? 22 : 0);
   add('Từng bị đột nhập (kẻ khác đã biết chỗ)', i.flags.includes('base_breached') ? 10 : 0);
-  const score = f.reduce((s, x) => s + x.value, 0);
+  // Các việc đã làm để che giấu (che cửa sổ, giấu vật tư, im lặng) giảm mức lộ diện
+  const stealth = (i.base.fortified || []).reduce((s, id) => s + (({ dim_light: 6, hide_stock: 6, quiet_floor: 4 } as Record<string, number>)[id] || 0), 0);
+  const score = Math.max(0, f.reduce((s, x) => s + x.value, 0) - stealth);
   // Dưới 14 điểm: căn cứ trông bình thường, không ai tấn công. Từ đó trở lên tăng dần, tối đa 20% mỗi lượt.
   const chance = Math.max(0, Math.min(0.2, (score - 14) * 0.006));
   return { score: Math.round(score), chance, factors: f.sort((a, b) => b.value - a.value) };

@@ -74,6 +74,8 @@ export interface Item {
   isSealed?: boolean;     // Đồ hộp nguyên kẹp chì (không hỏng cho đến khi mở)
   isCooked?: boolean;     // Đã được nấu chín an toàn
   isDried?: boolean;      // Thịt sấy khô / ướp muối bảo quản lâu dài
+  frozen?: boolean;       // Đã cất tủ đông trong căn cứ: không hỏng khi còn điện
+  curingTurns?: number;   // Đang ướp muối: còn bao nhiêu lượt nữa mới xong
   needsCooking?: boolean; // Gạo, mì, trứng, cá, thịt, nước chưa đun: ăn/uống sống sẽ hại bụng, phải nấu chín trước
 }
 
@@ -94,6 +96,7 @@ export interface BaseCamp {
   warehouse: Item[];      // Kho chứa an toàn trong căn cứ
   modules?: Record<string, number>; // Cấp của từng công trình (hệ thống khép kín)
   fuel?: number;          // Nhiên liệu dự trữ (bếp, máy phát, lọc nước)
+  fortified?: string[];   // Các việc gia cố đã làm (mỗi việc chỉ làm một lần)
   baseNodeId?: string;    // Cứ điểm trên bản đồ đang dùng làm căn cứ (nếu có)
   facilities: {
     hasStove: boolean;           // Bếp dã chiến nấu ăn

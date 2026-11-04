@@ -13,6 +13,8 @@ interface InventoryDrawerProps {
   onUseItem: (item: Item) => void;
   onCookFood: (item: Item) => void;
   onDryFood: (item: Item) => void;
+  onFreezeFood?: (item: Item) => void;
+  canFreeze?: boolean;
   onEquipItem: (item: Item) => void;
   onOpenCrafting: () => void;
   onOpenBaseWarehouse?: () => void;
@@ -33,7 +35,7 @@ const SLOTS = 30; // số ô tối thiểu hiển thị, các ô trống làm n�
 
 export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
   inventory, equippedWeapon, equippedArmor, wound,
-  onUseItem, onCookFood, onDryFood, onEquipItem, onOpenCrafting, onOpenBaseWarehouse, onClose,
+  onUseItem, onCookFood, onDryFood, onFreezeFood, canFreeze, onEquipItem, onOpenCrafting, onOpenBaseWarehouse, onClose,
 }) => {
   const [filter, setFilter] = useState<ItemCategory | 'all'>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -158,10 +160,10 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
           </div>
 
           {/* Mô tả nhanh */}
-          <aside className="w-full shrink-0 border-t border-neutral-800 bg-neutral-950/50 p-4 lg:w-80 lg:border-l lg:border-t-0">
+          <aside className="order-first w-full shrink-0 border-b border-neutral-800 bg-neutral-950/50 p-4 lg:sticky lg:top-0 lg:order-none lg:w-80 lg:self-start lg:border-b-0 lg:border-l">
             {!selected ? (
               <div className="py-10 text-center text-xs leading-relaxed text-neutral-500">
-                Chạm vào một ô để xem mô tả nhanh, chỉ số và các thao tác (dùng, nấu, sấy khô, trang bị).
+                Chạm vào một ô để xem mô tả nhanh, chỉ số và các thao tác (dùng, nấu, ướp muối, cất tủ đông, trang bị).
               </div>
             ) : (
               <div className="space-y-3">
@@ -173,6 +175,38 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
                       {RARITY_NAME[selected.rarity] || 'Thường'} · {CATEGORY_LABEL[selected.category] || selected.category} · {fmtQty(selected)}
                     </div>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pb-1">
+                  {canUse(selected) && (
+                    <button
+                      onClick={() => onUseItem(selected)}
+                      className={`flex-1 cursor-pointer rounded border px-3 py-1.5 text-xs font-semibold transition-colors ${isSpoiledItem(selected) ? 'border-red-700 bg-red-950 text-red-200 hover:bg-red-900' : 'border-emerald-700 bg-emerald-900/60 text-emerald-200 hover:bg-emerald-800'}`}
+                    >
+                      {selected.category === 'food' ? (selected.thirstReduce && !selected.hungerReduce ? 'Uống' : 'Ăn') : 'Dùng'}
+                    </button>
+                  )}
+                  {selected.category === 'food' && (selected.needsCooking || selected.canSpoil) && !selected.isCooked && !selected.isDried && (
+                    <button onClick={() => { sound.playLoot(); onCookFood(selected); }} className="flex cursor-pointer items-center gap-1 rounded border border-amber-700 bg-amber-950/60 px-3 py-1.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-900">
+                      <Flame className="h-3.5 w-3.5" />Nấu
+                    </button>
+                  )}
+                  {selected.category === 'food' && selected.canSpoil && !selected.isDried && (
+                    <button onClick={() => { sound.playLoot(); onDryFood(selected); }} className="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-semibold text-neutral-200 transition-colors hover:bg-neutral-700">
+                      Ướp muối
+                    </button>
+                  )}
+                  {selected.category === 'food' && selected.canSpoil && !selected.isDried && !selected.frozen && !selected.curingTurns && onFreezeFood && (
+                    <button onClick={() => onFreezeFood(selected)} disabled={!canFreeze} title={canFreeze ? 'Cất vào tủ đông của căn cứ, không hỏng khi còn điện' : 'Cần có căn cứ và điện'} className="cursor-pointer rounded border border-sky-800 bg-sky-950/50 px-3 py-1.5 text-xs font-semibold text-sky-200 transition-colors hover:bg-sky-900 disabled:cursor-not-allowed disabled:opacity-40">Cất tủ đông</button>
+                  )}
+                  {canEquip(selected) && (
+                    <button
+                      onClick={() => { sound.playClick(); onEquipItem(selected); }}
+                      className={`flex-1 cursor-pointer rounded border px-3 py-1.5 text-xs font-semibold transition-colors ${isEquipped(selected) ? 'border-neutral-700 bg-neutral-800 text-neutral-400' : 'border-red-700 bg-red-950/60 text-red-200 hover:bg-red-900'}`}
+                    >
+                      {isEquipped(selected) ? 'Đang dùng' : 'Trang bị'}
+                    </button>
+                  )}
                 </div>
 
                 <p className="text-xs leading-relaxed text-neutral-300">{selected.description || 'Chưa có mô tả.'}</p>
@@ -190,34 +224,6 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
                   <div className="rounded border border-amber-900 bg-amber-950/30 p-2 text-[11px] text-amber-300">Dùng sống sẽ no ít hơn và hại bụng. Hãy nấu chín trước.</div>
                 )}
 
-                <div className="flex flex-wrap gap-2 border-t border-neutral-800 pt-3">
-                  {canUse(selected) && (
-                    <button
-                      onClick={() => onUseItem(selected)}
-                      className={`flex-1 cursor-pointer rounded border px-3 py-1.5 text-xs font-semibold transition-colors ${isSpoiledItem(selected) ? 'border-red-700 bg-red-950 text-red-200 hover:bg-red-900' : 'border-emerald-700 bg-emerald-900/60 text-emerald-200 hover:bg-emerald-800'}`}
-                    >
-                      {selected.category === 'food' ? (selected.thirstReduce && !selected.hungerReduce ? 'Uống' : 'Ăn') : 'Dùng'}
-                    </button>
-                  )}
-                  {selected.category === 'food' && (selected.needsCooking || selected.canSpoil) && !selected.isCooked && !selected.isDried && (
-                    <button onClick={() => { sound.playLoot(); onCookFood(selected); }} className="flex cursor-pointer items-center gap-1 rounded border border-amber-700 bg-amber-950/60 px-3 py-1.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-900">
-                      <Flame className="h-3.5 w-3.5" />Nấu
-                    </button>
-                  )}
-                  {selected.category === 'food' && selected.canSpoil && !selected.isDried && (
-                    <button onClick={() => { sound.playLoot(); onDryFood(selected); }} className="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-semibold text-neutral-200 transition-colors hover:bg-neutral-700">
-                      Sấy khô
-                    </button>
-                  )}
-                  {canEquip(selected) && (
-                    <button
-                      onClick={() => { sound.playClick(); onEquipItem(selected); }}
-                      className={`flex-1 cursor-pointer rounded border px-3 py-1.5 text-xs font-semibold transition-colors ${isEquipped(selected) ? 'border-neutral-700 bg-neutral-800 text-neutral-400' : 'border-red-700 bg-red-950/60 text-red-200 hover:bg-red-900'}`}
-                    >
-                      {isEquipped(selected) ? 'Đang dùng' : 'Trang bị'}
-                    </button>
-                  )}
-                </div>
               </div>
             )}
           </aside>
