@@ -29,6 +29,8 @@ interface AmbientLayers {
   heatLfoGain: GainNode;
 }
 
+export type MusicTheme = 'off' | 'map' | 'home' | 'danger' | 'despair';
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
@@ -45,6 +47,13 @@ class SoundEngine {
   private screamsTimeout: number | null = null;
   private thunderTimeout: number | null = null;
   private compressor: DynamicsCompressorNode | null = null;
+
+  // Nhạc nền theo chủ đề (kiểu bản đồ / nhà / vùng nguy hiểm / tuyệt vọng), tự sáng tác bằng Web Audio
+  private musicGain: GainNode | null = null;
+  private musicTheme: MusicTheme = 'off';
+  private musicTimer: number | null = null;
+  private musicBar = 0;
+  private musicToken = 0;
 
   private init() {
     if (!this.ctx) {
@@ -587,6 +596,242 @@ class SoundEngine {
 
   public stopDarkAmbientDrone() {
     this.stopAmbientSoundscape();
+  }
+
+
+  // ================= NHẠC NỀN THEO CHỦ ĐỀ =================
+  private midi(m: number) {
+    return 440 * Math.pow(2, (m - 69) / 12);
+  }
+
+  private tone(freq: number, start: number, dur: number, type: OscillatorType, vol: number, attack = 0.02, cutoff = 0, vibrato = 0) {
+    if (!this.ctx || !this.musicGain) return;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, start);
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.linearRampToValueAtTime(vol, start + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    let node: AudioNode = osc;
+    if (cutoff > 0) {
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(cutoff, start);
+      osc.connect(f);
+      node = f;
+    }
+    if (vibrato > 0) {
+      const lfo = this.ctx.createOscillator();
+      const lg = this.ctx.createGain();
+      lfo.frequency.setValueAtTime(5, start);
+      lg.gain.setValueAtTime(vibrato, start);
+      lfo.connect(lg);
+      lg.connect(osc.frequency);
+      lfo.start(start);
+      lfo.stop(start + dur + 0.1);
+    }
+    node.connect(g);
+    g.connect(this.musicGain);
+    osc.start(start);
+    osc.stop(start + dur + 0.1);
+  }
+
+  private noiseHit(start: number, dur: number, vol: number, hp = 6000) {
+    if (!this.ctx || !this.musicGain) return;
+    const len = Math.max(1, Math.floor(this.ctx.sampleRate * dur));
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const f = this.ctx.createBiquadFilter();
+    f.type = 'highpass';
+    f.frequency.setValueAtTime(hp, start);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, start);
+    src.connect(f);
+    f.connect(g);
+    g.connect(this.musicGain);
+    src.start(start);
+  }
+
+  private kick(start: number, vol: number) {
+    if (!this.ctx || !this.musicGain) return;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(110, start);
+    o.frequency.exponentialRampToValueAtTime(40, start + 0.14);
+    g.gain.setValueAtTime(vol, start);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + 0.2);
+    o.connect(g);
+    g.connect(this.musicGain);
+    o.start(start);
+    o.stop(start + 0.25);
+  }
+
+  // Mỗi chủ đề: tốc độ, hợp âm theo ô nhịp và cách chơi. Giai điệu thưa, lặp lại nhẹ, mỗi vòng có biến thể ngẫu nhiên.
+  private scheduleBar(theme: MusicTheme, t0: number, bar: number) {
+    const rnd = (arr: number[]) => arr[Math.floor(Math.random() * arr.length)];
+    const triad = (root: number, minor: boolean) => [root, root + (minor ? 3 : 4), root + 7];
+    const addPad = (root: number, minor: boolean, dur: number, vol: number, extra = 0) => {
+      triad(root, minor).forEach((n, i) => {
+        this.tone(this.midi(n), t0, dur, 'triangle', vol, dur * 0.35, 900);
+        this.tone(this.midi(n) * (1.003 + i * 0.001), t0, dur, 'sine', vol * 0.6, dur * 0.4);
+      });
+      if (extra) this.tone(this.midi(root + extra), t0, dur, 'sine', vol * 0.5, dur * 0.4);
+    };
+
+    if (theme === 'home') {
+      // "Hy vọng": D trưởng, chậm rãi, ấm và sáng. Pad mềm + rải hợp âm + chuông thưa
+      const spb = 60 / 70;
+      const prog = [[50, false], [45, false], [47, true], [43, false]] as [number, boolean][];
+      const [root, minor] = prog[bar % 4];
+      addPad(root, minor, spb * 4, 0.06);
+      const notes = triad(root + 12, minor);
+      for (let i = 0; i < 8; i++) {
+        const n = notes[[0, 1, 2, 1, 2, 1, 0, 2][i]];
+        this.tone(this.midi(n + 12), t0 + i * spb * 0.5, spb * 1.2, 'triangle', 0.045, 0.01, 2200);
+      }
+      const pent = [74, 76, 78, 81, 83, 86];
+      if (bar % 2 === 0) this.tone(this.midi(rnd(pent)), t0 + spb * rnd([0, 1, 2]), spb * 2.5, 'sine', 0.05, 0.02);
+      if (bar % 4 === 3) this.tone(this.midi(rnd(pent)), t0 + spb * 3, spb * 3, 'sine', 0.04, 0.05);
+      return spb * 4;
+    }
+    if (theme === 'map') {
+      // Bản đồ thế giới: A dorian, nhịp bước đi, bass đi bộ và sáo xa
+      const spb = 60 / 84;
+      const prog = [[45, true], [43, false], [50, false], [40, true]] as [number, boolean][];
+      const [root, minor] = prog[bar % 4];
+      addPad(root + 12, minor, spb * 4, 0.045);
+      this.tone(this.midi(root), t0, spb * 1.6, 'sine', 0.1, 0.02, 500);
+      this.tone(this.midi(root + 7), t0 + spb * 2, spb * 1.6, 'sine', 0.08, 0.02, 500);
+      this.tone(this.midi(root + 12), t0 + spb * 3, spb * 0.9, 'sine', 0.05, 0.02, 500);
+      const dorian = [69, 71, 72, 74, 76, 78, 79, 81];
+      if (bar % 2 === 1 || Math.random() < 0.4) {
+        const st = rnd([0, 1, 2]);
+        this.tone(this.midi(rnd(dorian)), t0 + spb * st, spb * 2.2, 'sine', 0.055, 0.12, 0, 4);
+        if (Math.random() < 0.5) this.tone(this.midi(rnd(dorian)), t0 + spb * (st + 2), spb * 1.6, 'sine', 0.045, 0.1, 0, 4);
+      }
+      return spb * 4;
+    }
+    if (theme === 'danger') {
+      // Vùng nguy hiểm: A phrygian, dồn dập, bass bốc, trống nén, đoạn leo thang
+      const spb = 60 / 128;
+      const root = bar % 8 < 4 ? 33 : 34; // A1 / Bb1 gây căng
+      for (let i = 0; i < 8; i++) {
+        const st = t0 + i * spb * 0.5;
+        this.tone(this.midi(root + (i % 4 === 3 ? 12 : 0)), st, spb * 0.45, 'sawtooth', 0.07, 0.005, 420 + (bar % 4) * 80);
+        this.noiseHit(st, 0.05, i % 2 ? 0.03 : 0.015, 7000);
+      }
+      for (let i = 0; i < 4; i++) if (i % 2 === 0 || bar % 4 === 3) this.kick(t0 + i * spb, 0.16);
+      if (bar % 2 === 0) {
+        [root + 24, root + 27, root + 31].forEach((n) => this.tone(this.midi(n), t0 + spb * 2, spb * 0.8, 'square', 0.025, 0.01, 1400));
+      }
+      if (bar % 4 === 3) {
+        for (let k = 0; k < 6; k++) this.tone(this.midi(root + 36 + k), t0 + spb * (2 + k * 0.33), spb * 0.4, 'sawtooth', 0.02, 0.01, 2500);
+      }
+      return spb * 4;
+    }
+    if (theme === 'despair') {
+      // Tuyệt vọng: D thứ, rất chậm, nốt lệch gây khó chịu, tiếng piano lẻ loi và tiếng vọng xa
+      const spb = 60 / 52;
+      this.tone(this.midi(38), t0, spb * 4, 'sine', 0.09, spb * 1.2, 300);
+      this.tone(this.midi(45), t0, spb * 4, 'sine', 0.05, spb * 1.4, 400);
+      if (bar % 2 === 0) {
+        [50, 53, 57].forEach((n) => this.tone(this.midi(n), t0, spb * 4, 'triangle', 0.035, spb * 1.5, 800));
+        this.tone(this.midi(51), t0 + spb, spb * 3, 'sine', 0.018, spb, 900); // nốt thứ 2 lệch, gây u ám
+      } else {
+        [48, 51, 55].forEach((n) => this.tone(this.midi(n), t0, spb * 4, 'triangle', 0.035, spb * 1.5, 800));
+      }
+      const scale = [62, 65, 67, 69, 70, 72];
+      if (Math.random() < 0.75) this.tone(this.midi(rnd(scale)), t0 + spb * rnd([0.5, 1.5, 2.5]), spb * 3.2, 'triangle', 0.06, 0.005, 1500);
+      if (Math.random() < 0.15) this.synthesizeDistantWail(3);
+      return spb * 4;
+    }
+    return 4;
+  }
+
+  public setMusicTheme(theme: MusicTheme) {
+    if (theme === this.musicTheme) return;
+    try {
+      if (theme === 'off') {
+        this.stopMusic();
+        return;
+      }
+      this.init();
+      if (!this.ctx || !this.masterGain) return;
+      if (!this.musicGain) {
+        this.musicGain = this.ctx.createGain();
+        this.musicGain.gain.setValueAtTime(0, this.ctx.currentTime);
+        this.musicGain.connect(this.masterGain);
+      }
+      const now = this.ctx.currentTime;
+      // chuyển cảnh mượt: giảm nhạc cũ rồi vào nhạc mới
+      this.musicGain.gain.cancelScheduledValues(now);
+      this.musicGain.gain.setTargetAtTime(0, now, 0.4);
+      const token = ++this.musicToken;
+      this.musicTheme = theme;
+      this.musicBar = 0;
+      if (this.musicTimer !== null) clearTimeout(this.musicTimer);
+      const startNew = () => {
+        if (token !== this.musicToken || !this.ctx || !this.musicGain) return;
+        const t = this.ctx.currentTime;
+        this.musicGain.gain.cancelScheduledValues(t);
+        this.musicGain.gain.setTargetAtTime(0.9, t, 1.2);
+        const loop = () => {
+          if (token !== this.musicToken || !this.ctx) return;
+          const when = this.ctx.currentTime + 0.1;
+          const len = this.scheduleBar(theme, when, this.musicBar++);
+          this.musicTimer = window.setTimeout(loop, Math.max(500, len * 1000 - 150));
+        };
+        loop();
+      };
+      this.musicTimer = window.setTimeout(startNew, 700);
+    } catch {
+      // ignore
+    }
+  }
+
+  public stopMusic() {
+    this.musicToken++;
+    this.musicTheme = 'off';
+    if (this.musicTimer !== null) {
+      clearTimeout(this.musicTimer);
+      this.musicTimer = null;
+    }
+    if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.4);
+  }
+
+  // Tiếng động cơ nổ máy rồi chạy xa (xe máy / ô tô)
+  public playEngine() {
+    try {
+      this.init();
+      if (!this.ctx || !this.masterGain || this.muted) return;
+      const now = this.ctx.currentTime;
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      const f = this.ctx.createBiquadFilter();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(38, now);
+      o.frequency.linearRampToValueAtTime(70, now + 0.6);
+      o.frequency.linearRampToValueAtTime(52, now + 1.6);
+      o.frequency.exponentialRampToValueAtTime(30, now + 2.4);
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(380, now);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(0.22, now + 0.15);
+      g.gain.setValueAtTime(0.18, now + 1.6);
+      g.gain.exponentialRampToValueAtTime(0.0005, now + 2.4);
+      o.connect(f);
+      f.connect(g);
+      g.connect(this.masterGain);
+      o.start(now);
+      o.stop(now + 2.5);
+    } catch {
+      // ignore
+    }
   }
 
   // Tactical click

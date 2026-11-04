@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Heart,
   Droplet,
@@ -63,8 +63,43 @@ import { LootToast } from './components/LootToast';
 import { EmergencyEventAlert } from './components/EmergencyEventAlert';
 import { EndGameModal } from './components/EndGameModal';
 import { RadioBroadcast } from './components/RadioBroadcast';
-import { encodeMapAction, WorldNode } from './data/worldMap';
+import { CompanionChat, ChatMsg } from './components/CompanionChat';
+import { computeTeamEffects } from './utils/teamEffects';
+import type { RoleId } from './data/companionChat';
+import { SceneIllustration } from './components/SceneIllustration';
+import { encodeMapAction, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
+import { BaseHub } from './components/BaseHub';
+import { tickBase, payCost, MODULE_BY_ID, SHELTER_SUITABILITY, applyBaseDelta } from './utils/baseSystem';
+import { exposureOf } from './data/raid';
+import { getSetting } from './data/settings';
+import { WorldSummaryModal } from './components/WorldSummaryModal';
+import { buildWorldSummary, eventsFromFlags, WorldEvent } from './data/worldState';
+import { computeQuests, factionStanding, FLAG_TEXT } from './data/storyArc';
+import { Vehicle, VehicleKind, VEHICLES, REPAIR_COST, FUEL_RE, FUEL_PER_CAN } from './data/vehicles';
 import { sound } from './utils/audio';
+
+const SAVE_KEY = 'zombie-survival-save-v1';
+const SEEN_KEY = 'zombie-seen-scenes-v1';
+
+// Đếm số lần đã gặp từng cảnh qua mọi ván chơi: server dùng để ưu tiên cảnh mới, tránh lặp lại các cảnh đã qua.
+function loadSeen(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+function bumpSeen(sceneId?: string) {
+  if (!sceneId) return;
+  try {
+    const key = sceneId.startsWith('stranger:') ? 'stranger' : sceneId;
+    const seen = loadSeen();
+    seen[key] = (seen[key] || 0) + 1;
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    // bỏ qua
+  }
+}
 
 export default function App() {
   // Game Lifecycle State
@@ -134,6 +169,41 @@ export default function App() {
   // Sự kiện đã lên lịch (được báo trước qua radio)
   const [pendingEvents, setPendingEvents] = useState<PendingEvent[]>([]);
 
+  // Bối cảnh khởi đầu & vùng đang đứng (chỗ trú / xung quanh / ngoài đường / sân thượng)
+  const [settingId, setSettingId] = useState('apartment_survivors');
+  const [zone, setZone] = useState('shelter');
+  const [awayTurns, setAwayTurns] = useState(0);
+
+  // Hậu quả lâu dài của các quyết định (bỏ rơi người, giết/tha kẻ cướp, cứu hầm trú...): sẽ được nhắc lại ở các cảnh sau
+  const [worldFlags, setWorldFlags] = useState<string[]>([]);
+  const [aiNote, setAiNote] = useState('');
+
+  // Trò chuyện & phân công đồng đội
+  const [chatCompanionId, setChatCompanionId] = useState<string | null>(null);
+  const [chatLogs, setChatLogs] = useState<Record<string, ChatMsg[]>>({});
+  const [chatBusy, setChatBusy] = useState(false);
+  const [nameAskId, setNameAskId] = useState<string | null>(null);
+  const [teamLog, setTeamLog] = useState<string[]>([]);
+
+  // Cứ điểm ngẫu nhiên quanh căn cứ (mỗi ván một bộ khác nhau) và trạng thái vòng khép kín của căn cứ
+  const [outposts, setOutposts] = useState<OutpostInstance[]>([]);
+  const outpostNodes = useMemo(() => buildOutpostNodes(outposts), [outposts]);
+  const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+
+  // Nhật ký sự kiện quan trọng + tóm tắt trạng thái thế giới (ký ức dài hạn)
+  const [worldLog, setWorldLog] = useState<WorldEvent[]>([]);
+  const [showWorldSummary, setShowWorldSummary] = useState(false);
+  const [loopStatus, setLoopStatus] = useState<Record<string, 'ok' | 'starved' | 'off'>>({});
+
+  // Lưu/tiếp tục ván chơi (localStorage; có thể bị chặn nên luôn bọc try/catch)
+  const [hasSave, setHasSave] = useState(() => {
+    try {
+      return !!localStorage.getItem(SAVE_KEY);
+    } catch {
+      return false;
+    }
+  });
+
   // Loot Pop-up Notifications State
   const [lootNotifications, setLootNotifications] = useState<string[]>([]);
 
@@ -173,16 +243,78 @@ export default function App() {
       });
   }, []);
 
-  // Emergency countdown: mỗi giây trừ 1; hết giờ thì xử lý đúng một lần (không gọi trong state updater như trước)
+  // Tự động lưu sau mỗi lượt; xóa save khi thắng/thua để không tiếp tục một ván đã kết thúc.
   useEffect(() => {
-    if (!activeEmergency) return;
-    if (emergencySecondsLeft <= 0) {
-      handleEmergencyTimeout();
-      return;
+    try {
+      if (gamePhase === 'playing' && currentTurn && !isAiProcessing) {
+        const snapshot = {
+          player, base, companions, day, turnCount, location, weather, weatherLabel, tomorrowForecast,
+          backgroundEffect, dangerLevel, history: history.slice(-60), currentTurn, pendingEvents, visitedNodes, mapVisits,
+          settingId, zone, awayTurns, worldFlags, outposts, vehicle, worldLog,
+        };
+        localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
+        setHasSave(true);
+      } else if (gamePhase === 'game_over' || gamePhase === 'victory') {
+        localStorage.removeItem(SAVE_KEY);
+        setHasSave(false);
+      }
+    } catch {
+      // đầy bộ nhớ hoặc bị chặn: bỏ qua, game vẫn chơi được
     }
-    const id = window.setTimeout(() => setEmergencySecondsLeft((prev) => prev - 1), 1000);
-    return () => window.clearTimeout(id);
-  }, [activeEmergency, emergencySecondsLeft]);
+  }, [gamePhase, currentTurn, isAiProcessing]);
+
+  const handleContinueGame = () => {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      setPlayer(s.player);
+      setBase(s.base);
+      setCompanions(s.companions || []);
+      setDay(s.day);
+      setTurnCount(s.turnCount);
+      setLocation(s.location);
+      setWeather(s.weather);
+      setWeatherLabel(s.weatherLabel);
+      setTomorrowForecast(s.tomorrowForecast);
+      setBackgroundEffect(s.backgroundEffect);
+      setDangerLevel(s.dangerLevel);
+      setHistory(s.history || []);
+      setCurrentTurn(s.currentTurn);
+      setPendingEvents(s.pendingEvents || []);
+      setVisitedNodes(s.visitedNodes || []);
+      setMapVisits(s.mapVisits || {});
+      setSettingId(s.settingId || 'apartment_survivors');
+      setZone(s.zone || 'shelter');
+      setAwayTurns(s.awayTurns || 0);
+      setWorldFlags(s.worldFlags || []);
+      setOutposts(s.outposts || generateOutposts(4));
+      setVehicle(s.vehicle || null);
+      setWorldLog(s.worldLog || []);
+      setActiveEmergency(false);
+      setGamePhase('playing');
+    } catch {
+      localStorage.removeItem(SAVE_KEY);
+      setHasSave(false);
+    }
+  };
+
+  // Chọn nhạc nền theo hoàn cảnh: bản đồ / nhà / vùng nguy hiểm / tuyệt vọng
+  useEffect(() => {
+    if (!audioEnabled) { sound.stopMusic(); return; }
+    let theme: 'map' | 'home' | 'danger' | 'despair' | 'off' = 'off';
+    if (gamePhase === 'game_over') theme = 'despair';
+    else if (gamePhase === 'victory') theme = 'home';
+    else if (gamePhase === 'playing') {
+      const low = player.stats.sanity < 30 || player.stats.hp < 30;
+      if (showMapModal) theme = 'map';
+      else if (activeEmergency || dangerLevel >= 4) theme = 'danger';
+      else if (low) theme = 'despair';
+      else if (zone === 'shelter' || zone === 'roof') theme = 'home';
+      else theme = 'map';
+    }
+    sound.setMusicTheme(theme);
+  }, [gamePhase, audioEnabled, showMapModal, activeEmergency, dangerLevel, zone, player.stats.sanity < 30 || player.stats.hp < 30]);
 
   // Synchronize dynamic ambient soundscape with weather & danger level
   useEffect(() => {
@@ -231,6 +363,7 @@ export default function App() {
           player: newChar,
           scenarioId,
           customPrompt,
+          seenBefore: loadSeen(),
         }),
       });
       const data = await res.json();
@@ -265,12 +398,18 @@ export default function App() {
           'Lén lút di chuyển sang vị trí an toàn hơn',
         ],
         customChoiceAllowed: true,
-        scene_id: data.scene_id || 'r_start',
+        scene_id: data.scene_id || 'ai_start',
+        zone: data.zone || 'shelter',
         system_trigger: data.system_trigger,
         radio_transmission: data.radio_transmission,
       };
 
       setPendingEvents(data.pending_events || []);
+      setSettingId(data.settingId || scenarioId || 'apartment_survivors');
+      setZone(data.zone || 'shelter');
+      setAwayTurns(0);
+      setOutposts(generateOutposts(4));
+      bumpSeen(initialTurn.scene_id);
       setCurrentTurn(initialTurn);
       setLocation(initialTurn.location);
       setWeather(initialTurn.weather);
@@ -327,6 +466,13 @@ export default function App() {
           history: history.slice(-6),
           doneSceneIds: history.map((h) => h.scene_id).filter(Boolean),
           sceneId: currentTurn.scene_id,
+          settingId,
+          zone,
+          awayTurns,
+          flags: worldFlags,
+          hasVehicle: !!vehicle,
+          worldSummary: makeSummary().text,
+          seenBefore: loadSeen(),
           turnCount,
           tomorrowForecast,
           pendingEvents,
@@ -336,8 +482,8 @@ export default function App() {
           day,
           weather,
           worldFlags: {
-            rescued_pharmacist: companions.some((c) => c.name.includes('Giang')),
-            rescued_doctor: companions.some((c) => c.name.includes('Uyên')),
+            rescued_pharmacist: companions.some((c) => (c.realName || c.name).includes('Giang')),
+            rescued_doctor: companions.some((c) => (c.realName || c.name).includes('Uyên')),
             has_safe_base: base.hasBase,
             base_location: base.base_type || (location.toLowerCase().includes('quân sự') ? 'Military Base' : 'Apartment'),
           },
@@ -410,12 +556,14 @@ export default function App() {
         infectionPenalty = 5;
       }
 
+      const team = computeTeamEffects(companions, base.hasBase, currentWound.hasOpenWound, worldFlags);
+      const bt = tickBase(base, (data.weather || weather) as WeatherType, turnCount + 1);
       const effectiveMaxHp = lockedMaxHp || player.stats.maxHp;
       const nextHp = Math.max(0, Math.min(effectiveMaxHp, player.stats.hp + (data.statChanges?.hp || 0)));
-      const nextHunger = Math.max(0, Math.min(100, player.stats.hunger + (data.statChanges?.hunger ?? 5)));
+      const nextHunger = Math.max(0, Math.min(100, player.stats.hunger + (data.statChanges?.hunger ?? 5) + team.hunger));
       const nextThirst = Math.max(0, Math.min(100, player.stats.thirst + thirstDelta));
-      const nextInfection = Math.max(0, Math.min(100, player.stats.infection + (data.statChanges?.infection || 0) + infectionPenalty));
-      const nextSanity = Math.max(0, Math.min(100, player.stats.sanity + (data.statChanges?.sanity || 0) - sanityPenalty));
+      const nextInfection = Math.max(0, Math.min(100, player.stats.infection + (data.statChanges?.infection || 0) + infectionPenalty + team.infection + bt.infection));
+      const nextSanity = Math.max(0, Math.min(100, player.stats.sanity + (data.statChanges?.sanity || 0) - sanityPenalty + team.sanity + bt.sanity));
       const nextStamina = Math.max(0, Math.min(maxStamina, player.stats.stamina + staminaDelta));
 
       // 3. Food Spoilage Progression
@@ -430,9 +578,9 @@ export default function App() {
         return { ...item };
       });
 
-      let updatedBaseWarehouse = base.warehouse.map((item) => {
+      let updatedBaseWarehouse = bt.base.warehouse.map((item) => {
         if (item.category === 'food' && item.canSpoil && !item.isSealed && !item.isDried) {
-          if (base.facilities.hasGeneratorAndFridge) {
+          if (bt.base.facilities.hasGeneratorAndFridge) {
             return item;
           }
           const baseDecay = base.facilities.hasFoamBox ? Math.round(decayRate * 0.25) : Math.round(decayRate * 0.5);
@@ -452,6 +600,15 @@ export default function App() {
           }
         });
       }
+
+      team.loot.forEach((gItem: Item) => {
+        const ex = updatedInventory.find((it) => it.name === gItem.name);
+        if (ex) ex.quantity += gItem.quantity;
+        else updatedInventory.push(gItem);
+      });
+      if (team.loot.length) setLootNotifications((prev) => [...prev, ...team.loot.map((g) => `${g.name} x${g.quantity}`)]);
+      setTeamLog([...team.log, ...bt.log]);
+      setLoopStatus(bt.loopStatus);
 
       if (data.itemsLost && data.itemsLost.length > 0) {
         data.itemsLost.forEach((lItem: { name: string; quantity: number }) => {
@@ -479,7 +636,8 @@ export default function App() {
         setTimeout(() => setRecentSkillBanner(null), 6000);
       }
 
-      let updatedBase = { ...base, warehouse: updatedBaseWarehouse };
+      let updatedBase = { ...bt.base, warehouse: updatedBaseWarehouse, fortification: Math.min(100, bt.base.fortification + team.fortification) };
+      if (data.base_delta) updatedBase = applyBaseDelta(updatedBase, data.base_delta);
       if (data.discoveredBase && !base.hasBase) {
         sound.playLoot();
         updatedBase = {
@@ -514,7 +672,10 @@ export default function App() {
         skills: updatedSkills,
       });
 
-      let updatedCompanions = companions.map((c) => ({ ...c }));
+      let updatedCompanions = companions.map((c) => {
+        const dl = team.companionDelta[c.id];
+        return dl ? { ...c, morale: Math.max(0, Math.min(100, c.morale + (dl.morale || 0))), hp: Math.min(c.maxHp, c.hp + (dl.hp || 0)) } : { ...c };
+      });
       if (data.companionUpdates && data.companionUpdates.length > 0) {
         data.companionUpdates.forEach((up: any) => {
           const comp = updatedCompanions.find((c) => c.name === up.name);
@@ -525,6 +686,10 @@ export default function App() {
             if (up.affectionChange) comp.affection = Math.max(0, Math.min(100, (comp.affection || 0) + up.affectionChange));
             if (up.statusChange) comp.status = up.statusChange;
             if (up.dialogue) comp.lastComment = up.dialogue;
+            if (up.revealName && comp.nameKnown === false && comp.realName) {
+              comp.name = comp.realName;
+              comp.nameKnown = true;
+            }
           }
         });
       }
@@ -553,10 +718,28 @@ export default function App() {
 
       // Conditional Companion Recruitment: Only if specifically rescued
       if (data.newCompanion && !updatedCompanions.some((c) => c.id === data.newCompanion.id)) {
-        updatedCompanions.push({ ...data.newCompanion, hasBeenRescued: true });
+        updatedCompanions.push({ ...data.newCompanion, hasBeenRescued: true, joinedTurn: turnCount + 1 });
         setRecentCompanionBanner(data.newCompanion);
         setTimeout(() => setRecentCompanionBanner(null), 6000);
       }
+      // Đồng đội bỏ đi (phản bội, bỏ nhóm) rời khỏi danh sách; người hy sinh được đánh dấu đã mất
+      {
+        const leaving = (data.companionUpdates || []).filter((u: any) => u.leave).map((u: any) => u.name);
+        if (leaving.length) {
+          updatedCompanions = updatedCompanions.filter((c) => !leaving.includes(c.name));
+          setWorldLog((prev) => [...prev, { day: nextDay, turn: nextTurnNum, kind: 'relation' as const, text: `Một đồng đội đã rời nhóm: ${leaving.join(', ')}` }].slice(-60));
+        }
+        const died = (data.companionUpdates || []).filter((u: any) => u.statusChange === 'deceased').map((u: any) => u.name);
+        if (died.length) setWorldLog((prev) => [...prev, { day: nextDay, turn: nextTurnNum, kind: 'relation' as const, text: `Đã mất: ${died.join(', ')}` }].slice(-60));
+      }
+
+      // Người mới chưa biết tên: lộ tên khi đủ tin tưởng hoặc sau vài lượt đồng hành.
+      updatedCompanions = updatedCompanions.map((c) => {
+        if (c.nameKnown === false && c.realName && (c.trust >= 60 || turnCount + 1 - (c.joinedTurn ?? turnCount + 1) >= 5)) {
+          return { ...c, name: c.realName, nameKnown: true, lastComment: `À, tôi chưa kịp nói... tôi tên là ${c.realName}.` };
+        }
+        return c;
+      });
       setCompanions(updatedCompanions);
 
       const nextTurnNum = turnCount + 1;
@@ -588,7 +771,7 @@ export default function App() {
         weatherLabel: data.weatherLabel || weatherLabel,
         tomorrowForecast: data.tomorrowForecast,
         background_effect: bgEff,
-        dangerLevel: data.dangerLevel || dangerLevel,
+        dangerLevel: Math.max(1, (data.dangerLevel || dangerLevel) + bt.danger),
         situation: data.situation,
         choices: data.choices || [
           'Lục soát tìm kiếm thêm đồ hộp và nước uống',
@@ -602,12 +785,38 @@ export default function App() {
         loot_notification: data.loot_notification,
         system_note: data.system_note,
         scene_id: data.scene_id,
+        zone: data.zone,
         system_trigger: data.system_trigger,
         radio_transmission: data.radio_transmission,
         game_ending: data.game_ending,
       };
 
+      if (data.vehicle_delta) {
+        setVehicle((v) => (v ? { ...v, condition: Math.max(0, Math.min(100, v.condition + (data.vehicle_delta.condition || 0))), fuel: Math.max(0, Math.min(VEHICLES[v.kind].maxFuel, v.fuel + (data.vehicle_delta.fuel || 0))) } : v));
+      }
       setPendingEvents(data.pending_events || []);
+      setZone(data.zone || zone);
+      setAwayTurns(data.awayTurns ?? 0);
+      setWorldFlags((prev) => [...new Set([...prev, ...(data.flags_add || [])])].filter((f) => !(data.flags_remove || []).includes(f)));
+      setAiNote(data.ai_note || '');
+      {
+        const evts: WorldEvent[] = [...eventsFromFlags(data.flags_add || [], nextDay, nextTurnNum)];
+        const sid: string = data.scene_id || '';
+        if (data.newCompanion) evts.push({ day: nextDay, turn: nextTurnNum, kind: 'relation', text: 'Một người sống sót mới gia nhập nhóm (chưa biết tên)' });
+        if (sid.startsWith('milestone_')) evts.push({ day: nextDay, turn: nextTurnNum, kind: 'story', text: 'Một bước ngoặt cốt truyện xảy ra' });
+        if (sid === 'event_horde_night') evts.push({ day: nextDay, turn: nextTurnNum, kind: 'world', text: 'Một bầy zombie lớn kéo ngang khu phố' });
+        if (sid === 'event_supply_drop') evts.push({ day: nextDay, turn: nextTurnNum, kind: 'world', text: 'Thùng tiếp tế rơi gần khu vực của bạn' });
+        if (sid === 'event_acid_rain_superstorm') evts.push({ day: nextDay, turn: nextTurnNum, kind: 'world', text: 'Bão mưa lớn đổ bộ như dự báo' });
+        if (sid.startsWith('stranger:')) evts.push({ day: nextDay, turn: nextTurnNum, kind: 'relation', text: 'Gặp một người lạ ngẫu nhiên' });
+        if (data.system_note && /CỘT MỐC NGÀY/.test(data.system_note)) evts.push({ day: nextDay, turn: nextTurnNum, kind: 'world', text: String(data.system_note).replace('⚠️ ', '') });
+        if (evts.length) setWorldLog((prev) => [...prev, ...evts].slice(-60));
+        if ((data.flags_add || []).includes('building_secured')) {
+          setBase((b) => ({ ...b, fortification: Math.min(100, b.fortification + 20) }));
+          setRecentBaseBanner('Đã làm chủ cả tòa nhà (+20% kiên cố)');
+          setTimeout(() => setRecentBaseBanner(null), 6000);
+        }
+      }
+      bumpSeen(data.scene_id);
       if (data.radio_transmission) sound.playRadioStatic();
       if (typeof data.scene_id === 'string' && data.scene_id.startsWith('milestone_')) sound.playStinger();
       setCurrentTurn(nextTurnObj);
@@ -632,7 +841,7 @@ export default function App() {
   };
 
   // Di chuyển & lục soát từ bản đồ: hành động được mã hóa để server xử lý tất định theo quãng đường/độ nguy hiểm.
-  const handleTravelFromMap = (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number) => {
+  const handleTravelFromMap = (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number, opts: { useVehicle: boolean; crew: number } = { useVehicle: false, crew: 0 }) => {
     if (isAiProcessing) return;
     setShowMapModal(false);
     const visits = mapVisits[node.id] || 0;
@@ -641,14 +850,10 @@ export default function App() {
       : `Tôi di chuyển đến ${node.name} (${hops} chặng), dùng xà beng phá khóa tủ sắt và chấp nhận rủi ro tiếng động để tìm vật tư cao cấp.`;
     setMapVisits((prev) => ({ ...prev, [node.id]: (prev[node.id] || 0) + 1 }));
     setVisitedNodes((prev) => (prev.includes(node.id) ? prev : [...prev, node.id]));
-    handleExecuteTurn(encodeMapAction(node.id, lootStyle, hops, visits, text), 'choice');
-  };
-
-  // Emergency timeout fallback
-  const handleEmergencyTimeout = () => {
+    if (opts.useVehicle && vehicle) sound.playEngine();
     handleExecuteTurn(
-      'Tôi bị đông cứng người vì quá hoảng loạn và do dự, không kịp phản ứng trước mối nguy hiểm bất ngờ!',
-      'emergency_timeout'
+      encodeMapAction(node.id, lootStyle, hops, visits, text, opts.useVehicle && vehicle ? { vehicle: vehicle.kind, vcond: vehicle.condition, vfuel: vehicle.fuel, crew: opts.crew } : { crew: 0 }),
+      'choice',
     );
   };
 
@@ -667,6 +872,12 @@ export default function App() {
       sound.playCue('zombie_growl');
       infectionChange += 30;
       hpChange -= 20;
+    }
+
+    // Thức ăn/nước cần nấu mà dùng sống: no ít hơn và hại bụng
+    if (item.needsCooking && !item.isCooked) {
+      hungerChange = Math.round(hungerChange * 0.55);
+      infectionChange += 8;
     }
 
     let updatedWound = { ...player.wound };
@@ -896,6 +1107,201 @@ export default function App() {
     setCompanions(updatedComps);
   };
 
+  // Tóm tắt trạng thái thế giới: dựng từ trạng thái hiện tại + nhật ký sự kiện
+  const makeSummary = () =>
+    buildWorldSummary({
+      day, turn: turnCount, weatherLabel, forecastLabel: tomorrowForecast?.label, locationText: location, dangerLevel,
+      flags: worldFlags, companions, base, inventory: player.inventory, vehicle,
+      visitedNames: visitedNodes.map((id) => getNodeAny(id)?.name || '').filter(Boolean),
+      outpostNames: [],
+      stats: { hp: player.stats.hp, maxHp: player.stats.maxHp, hunger: player.stats.hunger, thirst: player.stats.thirst, infection: player.stats.infection, sanity: player.stats.sanity, stamina: player.stats.stamina },
+      equippedWeapon: player.equippedWeapon?.name,
+      log: worldLog,
+    });
+  const pushLog = (kind: WorldEvent['kind'], text: string) => setWorldLog((prev) => [...prev, { day, turn: turnCount, kind, text }].slice(-60));
+
+  // Lập căn cứ tại chỗ trú hiện tại
+  const handleEstablishBase = () => {
+    const st = getSetting(settingId);
+    const suit = SHELTER_SUITABILITY[settingId] || SHELTER_SUITABILITY.apartment_survivors;
+    sound.playLoot();
+    setBase((b) => ({
+      ...b,
+      hasBase: true,
+      name: `Căn cứ ${st.place}`,
+      location: st.labels.shelter,
+      description: `Căn cứ dựng ngay tại ${st.labels.shelter}.`,
+      fortification: Math.max(b.fortification, 15 + Math.round(suit.score / 5)),
+      base_type: suit.kind,
+      modules: { ...(b.modules || {}) },
+      fuel: b.fuel || 0,
+    }));
+    setRecentBaseBanner(`Căn cứ ${st.place}`);
+    setTimeout(() => setRecentBaseBanner(null), 6000);
+    pushLog('survival', `Lập căn cứ tại ${st.labels.shelter}`);
+  };
+
+  // Xây hoặc nâng cấp một công trình: trừ vật tư (ba lô trước, rồi kho căn cứ)
+  const handleBuildModule = (moduleId: string) => {
+    const def = MODULE_BY_ID[moduleId];
+    if (!def) return;
+    const cur = base.modules?.[moduleId] || 0;
+    if (cur >= def.maxLevel) return;
+    const paid = payCost(def.cost(cur + 1), player.inventory, base.warehouse);
+    if (!paid) return;
+    sound.playLoot();
+    setPlayer({ ...player, inventory: paid.backpack });
+    setBase({
+      ...base,
+      warehouse: paid.warehouse,
+      modules: { ...(base.modules || {}), [moduleId]: cur + 1 },
+      fortification: moduleId === 'walls' ? Math.min(100, base.fortification + 15) : base.fortification,
+      facilities: {
+        ...base.facilities,
+        hasStove: base.facilities.hasStove || moduleId === 'stove',
+      },
+    });
+    setRecentBaseBanner(`${def.name} (cấp ${cur + 1})`);
+    setTimeout(() => setRecentBaseBanner(null), 5000);
+  };
+
+  // Chiếm một cứ điểm tìm được trên bản đồ làm căn cứ
+  const handleClaimBase = (node: WorldNode) => {
+    if (!node.outpost) return;
+    setShowMapModal(false);
+    sound.playLoot();
+    setBase((b) => ({
+      ...b,
+      hasBase: true,
+      name: node.outpost!.baseName,
+      location: node.name,
+      description: node.description,
+      fortification: 20 + (node.outpost!.bonus.walls || 0) * 15,
+      base_type: node.outpost!.baseKind,
+      baseNodeId: node.id,
+      modules: { ...node.outpost!.bonus },
+      fuel: b.fuel || 0,
+    }));
+    setRecentBaseBanner(node.outpost.baseName);
+    setTimeout(() => setRecentBaseBanner(null), 6000);
+    pushLog('survival', `Chiếm ${node.name} làm căn cứ mới`);
+  };
+
+  // Lắp xe từ phụ tùng; sửa xe; đổ xăng
+  const handleBuildVehicle = (kind: VehicleKind) => {
+    const paid = payCost(VEHICLES[kind].cost, player.inventory, base.warehouse);
+    if (!paid) return;
+    sound.playLoot();
+    setPlayer({ ...player, inventory: paid.backpack });
+    setBase({ ...base, warehouse: paid.warehouse });
+    setVehicle({ kind, condition: 70, fuel: 0 });
+    pushLog('survival', `Lắp ráp ${VEHICLES[kind].name}`);
+    setRecentBaseBanner(`Đã lắp ${VEHICLES[kind].name}`);
+    setTimeout(() => setRecentBaseBanner(null), 5000);
+  };
+  const handleRepairVehicle = () => {
+    if (!vehicle) return;
+    const paid = payCost(REPAIR_COST, player.inventory, base.warehouse);
+    if (!paid) return;
+    sound.playLoot();
+    setPlayer({ ...player, inventory: paid.backpack });
+    setBase({ ...base, warehouse: paid.warehouse });
+    setVehicle({ ...vehicle, condition: Math.min(100, vehicle.condition + 35) });
+  };
+  const handleRefuelVehicle = () => {
+    if (!vehicle) return;
+    const max = VEHICLES[vehicle.kind].maxFuel;
+    if (vehicle.fuel >= max) return;
+    const takeOne = (items: Item[]) => {
+      const it = items.find((i) => FUEL_RE.test(i.name) && i.category === 'material' && i.quantity > 0);
+      if (!it) return null;
+      return items.map((i) => (i.id === it.id ? { ...i, quantity: i.quantity - 1 } : i)).filter((i) => i.quantity > 0);
+    };
+    const bp = takeOne(player.inventory);
+    const wh = bp ? null : takeOne(base.warehouse);
+    if (!bp && !wh) return;
+    sound.playLoot();
+    if (bp) setPlayer({ ...player, inventory: bp });
+    if (wh) setBase({ ...base, warehouse: wh });
+    setVehicle({ ...vehicle, fuel: Math.min(max, vehicle.fuel + FUEL_PER_CAN) });
+  };
+
+  // Giao việc cho đồng đội (từ giao diện hoặc từ lời nói trong khung chat)
+  const handleSetRole = (companionId: string, role: RoleId) => {
+    setCompanions((prev) => prev.map((c) => (c.id === companionId ? { ...c, assignment: role === 'none' ? undefined : role } : c)));
+  };
+
+  // Gửi câu người chơi gõ cho đồng đội: AI (nếu còn khóa) hoặc engine offline trả lời, rồi cập nhật thiện cảm.
+  const handleSendChat = async (text: string) => {
+    const comp = companions.find((c) => c.id === chatCompanionId);
+    if (!comp || chatBusy) return;
+    const history = chatLogs[comp.id] || [];
+    setChatLogs((prev) => ({ ...prev, [comp.id]: [...history, { from: 'player', text }] }));
+    setChatBusy(true);
+    try {
+      const res = await fetch('/api/companion/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companion: { ...comp, hp: comp.hp },
+          player: { gender: player.gender, name: player.name, nameKnown: player.nameKnown !== false, sanity: player.stats.sanity },
+          text,
+          history: history.filter((m) => m.from !== 'system').slice(-8),
+          context: { day, zoneLabel: location, weather, hasBase: base.hasBase, safe: base.hasBase },
+          askedName: !!comp.askedPlayerName,
+        }),
+      });
+      const r = await res.json();
+      const clamp = (n: number) => Math.max(0, Math.min(100, n));
+      setCompanions((prev) =>
+        prev.map((c) =>
+          c.id !== comp.id ? c : {
+            ...c,
+            affection: clamp((c.affection || 0) + (r.affectionChange || 0)),
+            trust: clamp(c.trust + (r.trustChange || 0)),
+            morale: clamp(c.morale + (r.moraleChange || 0)),
+            intimacyLevel: r.intimacyLevel || c.intimacyLevel,
+            name: r.revealName && c.realName ? c.realName : c.name,
+            nameKnown: r.revealName ? true : c.nameKnown,
+            assignment: r.assignment && r.assignment !== 'none' ? r.assignment : c.assignment,
+            askedPlayerName: c.askedPlayerName || !!r.asksPlayerName,
+            lastComment: r.reply,
+          },
+        ),
+      );
+      if (r.sanityChange) setPlayer((p) => ({ ...p, stats: { ...p.stats, sanity: Math.max(0, Math.min(100, p.stats.sanity + r.sanityChange)) } }));
+      setChatLogs((prev) => ({
+        ...prev,
+        [comp.id]: [
+          ...(prev[comp.id] || []),
+          { from: 'npc', text: r.reply, delta: { aff: r.affectionChange, trust: r.trustChange } },
+          ...(r.revealName && comp.realName ? [{ from: 'system' as const, text: `Bạn đã biết tên người này: ${comp.realName}.` }] : []),
+          ...(r.assignment && r.assignment !== 'none' ? [{ from: 'system' as const, text: 'Đã ghi nhận phân công.' }] : []),
+        ],
+      }));
+      if (r.asksPlayerName) setNameAskId(comp.id);
+      if (r.ai_note) setAiNote(r.ai_note);
+    } catch {
+      setChatLogs((prev) => ({ ...prev, [comp.id]: [...(prev[comp.id] || []), { from: 'system', text: 'Không kết nối được máy chủ, hãy thử lại.' }] }));
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  // Đồng đội hỏi tên: người chơi tự quyết định có nói tên mình hay không
+  const handleAnswerName = (name: string | null) => {
+    const id = nameAskId;
+    if (!id) return;
+    setNameAskId(null);
+    if (name) {
+      setPlayer((p) => ({ ...p, name, nameKnown: true }));
+      setCompanions((prev) => prev.map((c) => (c.id === id ? { ...c, trust: Math.min(100, c.trust + 4), affection: Math.min(100, (c.affection || 0) + 2) } : c)));
+      setChatLogs((prev) => ({ ...prev, [id]: [...(prev[id] || []), { from: 'player', text: `Tôi tên là ${name}.` }, { from: 'npc', text: `${name}... một cái tên đẹp. Rất vui được biết bạn.`, delta: { aff: 2, trust: 4 } }] }));
+    } else {
+      setChatLogs((prev) => ({ ...prev, [id]: [...(prev[id] || []), { from: 'player', text: '(Im lặng, chưa muốn nói tên mình.)' }, { from: 'npc', text: 'Không sao. Khi nào tiện thì nói, tôi không ép đâu.' }] }));
+    }
+  };
+
   // Companion Talk / Morale
   const handleTalkCompanion = (companionId: string) => {
     sound.playClick();
@@ -1079,6 +1485,13 @@ export default function App() {
     setVisitedNodes([]);
     setMapVisits({});
     setPendingEvents([]);
+    setZone('shelter');
+    setAwayTurns(0);
+    setWorldFlags([]);
+    setOutposts([]);
+    setVehicle(null);
+    setWorldLog([]);
+    setLoopStatus({});
     setTomorrowForecast(undefined);
     setLootNotifications([]);
     setActiveEmergency(false);
@@ -1112,6 +1525,14 @@ export default function App() {
         cityPowerBlackout={day >= 10}
       />
 
+      {/* Lớp hạt nhiễu phim + tối góc: cảm giác tranh than chì, giấy ố, bụi tro */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 z-[5] opacity-[0.16] mix-blend-overlay"
+        style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5  0 0 0 0 0.45  0 0 0 0 0.4  0 0 0 0.9 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")" }}
+      />
+      <div aria-hidden className="pointer-events-none fixed inset-0 z-[5]" style={{ background: 'radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(8,5,2,0.55) 100%)' }} />
+
       {/* Loot Notification Pop-up Toast */}
       <LootToast
         notifications={lootNotifications}
@@ -1122,6 +1543,7 @@ export default function App() {
       {gamePhase === 'title' && (
         <TitleScreen
           onStartGame={() => setGamePhase('creation')}
+          onContinueGame={hasSave ? handleContinueGame : undefined}
           onOpenChronicle={() => setShowChronicle(true)}
           audioEnabled={audioEnabled}
           onToggleAudio={handleToggleAudio}
@@ -1150,9 +1572,9 @@ export default function App() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm text-white">{player.name}</span>
+                    <span className="font-bold text-sm text-white">{player.nameKnown === false ? 'Người sống sót' : player.name}</span>
                     <span className="text-[11px] text-neutral-400 font-mono">
-                      ({player.backgroundTitle})
+                      {player.nameKnown === false ? '(chưa ai biết tên)' : `(${player.backgroundTitle})`}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-neutral-400 font-mono">
@@ -1186,6 +1608,14 @@ export default function App() {
                     <span className="text-[9px] font-mono text-amber-400/90 bg-neutral-900 px-1 py-0.5 rounded border border-neutral-800">
                       ~{tomorrowForecast.accuracyPercent}%
                     </span>
+                  </div>
+                )}
+
+                {vehicle && (
+                  <div className="flex items-center gap-1.5 bg-sky-950/40 border border-sky-800/50 px-2 py-1 rounded text-sky-300 font-mono text-[11px]" title="Xe của bạn">
+                    <span>{VEHICLES[vehicle.kind].icon}</span>
+                    <span>⛽{Math.round(vehicle.fuel)}</span>
+                    <span>🔧{Math.round(vehicle.condition)}%</span>
                   </div>
                 )}
 
@@ -1267,10 +1697,10 @@ export default function App() {
                 <button
                   onClick={() => {
                     sound.playClick();
-                    setShowChronicle(true);
+                    setShowWorldSummary(true);
                   }}
                   className="p-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded text-sky-400 transition-colors cursor-pointer"
-                  title="Nhật ký 5 nhánh cốt truyện"
+                  title="Tóm tắt trạng thái thế giới"
                 >
                   <BookOpen className="w-4 h-4" />
                 </button>
@@ -1463,11 +1893,12 @@ export default function App() {
 
           {/* Emergency Event Alert (If active) */}
           {activeEmergency && (
-            <EmergencyEventAlert
-              secondsLeft={emergencySecondsLeft}
-              totalSeconds={currentTurn?.emergencySeconds || 15}
-              onTimeout={handleEmergencyTimeout}
-            />
+            <EmergencyEventAlert />
+          )}
+
+          {/* Bản tin radio (chỉ hiện khi có thông tin về tương lai) */}
+          {currentTurn?.radio_transmission && (
+            <RadioBroadcast key={`radio-${currentTurn.turnNumber}`} text={currentTurn.radio_transmission} />
           )}
 
           {/* Bản tin radio (chỉ hiện khi có thông tin về tương lai) */}
@@ -1478,6 +1909,13 @@ export default function App() {
           {/* Story Narrative & Outcome Card (Smooth, stable, clear reading experience) */}
           <main className="flex-1 bg-neutral-900/90 border border-neutral-800 rounded-xl p-5 sm:p-7 backdrop-blur-md shadow-2xl flex flex-col justify-between mb-4">
             <div className="space-y-5">
+              <SceneIllustration
+                sceneId={currentTurn?.scene_id}
+                weather={weather}
+                dangerLevel={dangerLevel}
+                blackout={day >= 10}
+              />
+
               {/* Previous Outcome Callout */}
               {currentTurn?.outcome && (
                 <div className="p-4 bg-neutral-950/80 border-l-4 border-amber-500 rounded-r-lg text-sm text-neutral-300 leading-relaxed shadow-sm">
@@ -1485,6 +1923,13 @@ export default function App() {
                     KẾT QUẢ HÀNH ĐỘNG VỪA QUA
                   </div>
                   <p>{currentTurn.outcome}</p>
+                </div>
+              )}
+
+              {teamLog.length > 0 && (
+                <div className="rounded-r-lg border-l-4 border-sky-600 bg-sky-950/20 p-3 text-xs leading-relaxed text-sky-100">
+                  <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-sky-300">Nhóm làm việc</div>
+                  {teamLog.map((l, i) => (<div key={i}>• {l}</div>))}
                 </div>
               )}
 
@@ -1638,13 +2083,23 @@ export default function App() {
       )}
 
       {showBaseModal && (
-        <BaseManagementModal
+        <BaseHub
           base={base}
           backpack={player.inventory}
+          settingId={settingId}
+          shelterLabel={getSetting(settingId).labels.shelter}
+          placeName={getSetting(settingId).place}
+          loopStatus={loopStatus}
+          onEstablish={handleEstablishBase}
+          onBuild={handleBuildModule}
+          companions={companions}
+          exposure={exposureOf({ base, flags: worldFlags, day, companionCount: companions.filter((c) => c.status !== 'deceased').length, hasVehicle: !!vehicle })}
+          vehicle={vehicle}
+          onBuildVehicle={handleBuildVehicle}
+          onRepairVehicle={handleRepairVehicle}
+          onRefuelVehicle={handleRefuelVehicle}
           onStoreItem={handleStoreItem}
           onRetrieveItem={handleRetrieveItem}
-          onUpgradeFortification={handleUpgradeFortification}
-          onInstallFacility={handleInstallFacility}
           onClose={() => setShowBaseModal(false)}
         />
       )}
@@ -1656,8 +2111,29 @@ export default function App() {
           weather={weather}
           stamina={player.stats.stamina}
           homeName={base.hasBase ? base.name : location}
+          extraNodes={outpostNodes}
+          baseNodeId={base.baseNodeId}
+          hasBase={base.hasBase}
+          onClaimBase={handleClaimBase}
+          vehicle={vehicle}
+          crewAvailable={companions.filter((c) => c.status !== 'deceased' && c.hp >= 25).length}
           onTravel={handleTravelFromMap}
           onClose={() => setShowMapModal(false)}
+        />
+      )}
+
+      {chatCompanionId && companions.find((c) => c.id === chatCompanionId) && (
+        <CompanionChat
+          companion={companions.find((c) => c.id === chatCompanionId)!}
+          playerGender={player.gender}
+          playerNameKnown={player.nameKnown !== false}
+          log={chatLogs[chatCompanionId] || []}
+          busy={chatBusy}
+          askingName={nameAskId === chatCompanionId}
+          onSend={handleSendChat}
+          onSetRole={(role) => handleSetRole(chatCompanionId, role)}
+          onAnswerName={handleAnswerName}
+          onClose={() => setChatCompanionId(null)}
         />
       )}
 
@@ -1676,11 +2152,28 @@ export default function App() {
               onTreatIncubation={handleTreatIncubation}
               onPurgeCompanion={handlePurgeCompanion}
               hasSafeBase={base.hasBase && base.fortification >= 50}
+              playerGender={player.gender}
+              onOpenChat={(c) => { setShowCompanions(false); setChatCompanionId(c.id); }}
               onClose={() => setShowCompanions(false)}
             />
           </div>
         </div>
       )}
+
+      {showWorldSummary && (() => {
+        const summary = makeSummary();
+        return (
+          <WorldSummaryModal
+            summary={summary}
+            quests={computeQuests({ flags: worldFlags, day, fortification: base.fortification, hasBase: base.hasBase, companionsAlive: companions.filter((c) => c.status !== 'deceased').length })}
+            factions={factionStanding(worldFlags)}
+            flagsText={worldFlags.filter((f) => FLAG_TEXT[f] && !/^clue_/.test(f)).map((f) => FLAG_TEXT[f])}
+            clueIds={worldFlags.filter((f) => /^clue_/.test(f))}
+            log={worldLog}
+            onClose={() => setShowWorldSummary(false)}
+          />
+        );
+      })()}
 
       {showChronicle && (
         <ChronicleModal

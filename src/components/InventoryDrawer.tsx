@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Package, Shield, Swords, Plus, Heart, Utensils, Droplet, Sparkles, X, Hammer, Flame, AlertCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Package, Shield, Swords, X, Hammer, Flame, AlertCircle } from 'lucide-react';
 import { Item, ItemCategory, WoundState } from '../types/game';
+import { CATEGORY_LABEL, itemIcon, quickFacts } from '../utils/itemIcon';
 import { sound } from '../utils/audio';
 
 interface InventoryDrawerProps {
@@ -17,310 +18,208 @@ interface InventoryDrawerProps {
   onClose: () => void;
 }
 
+const RARITY_RING: Record<string, string> = {
+  epic: 'border-purple-500/80 shadow-[inset_0_0_12px_rgba(168,85,247,0.25)]',
+  rare: 'border-sky-500/80 shadow-[inset_0_0_12px_rgba(56,189,248,0.2)]',
+  uncommon: 'border-emerald-600/80',
+  common: 'border-neutral-700',
+};
+const RARITY_TEXT: Record<string, string> = { epic: 'text-purple-400', rare: 'text-sky-400', uncommon: 'text-emerald-400', common: 'text-neutral-400' };
+const RARITY_NAME: Record<string, string> = { epic: 'Sử thi', rare: 'Hiếm', uncommon: 'Khá', common: 'Thường' };
+
+const FILTERS: (ItemCategory | 'all')[] = ['all', 'food', 'medical', 'weapon', 'special', 'tool', 'material', 'ammo'];
+const SLOTS = 30; // số ô tối thiểu hiển thị, các ô trống làm nền cho cảm giác "balo"
+
 export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
-  inventory,
-  equippedWeapon,
-  equippedArmor,
-  wound,
-  onUseItem,
-  onCookFood,
-  onDryFood,
-  onEquipItem,
-  onOpenCrafting,
-  onOpenBaseWarehouse,
-  onClose,
+  inventory, equippedWeapon, equippedArmor, wound,
+  onUseItem, onCookFood, onDryFood, onEquipItem, onOpenCrafting, onOpenBaseWarehouse, onClose,
 }) => {
-  const [filterCategory, setFilterCategory] = useState<ItemCategory | 'all'>('all');
+  const [filter, setFilter] = useState<ItemCategory | 'all'>('all');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const filteredItems = inventory.filter((item) => {
-    if (filterCategory === 'all') return true;
-    return item.category === filterCategory;
-  });
+  const items = useMemo(() => inventory.filter((i) => filter === 'all' || i.category === filter), [inventory, filter]);
+  const selected = inventory.find((i) => i.id === selectedId) || null;
 
-  const getRarityBadge = (rarity: string) => {
-    switch (rarity) {
-      case 'epic':
-        return 'border-purple-600 text-purple-400 bg-purple-950/40';
-      case 'rare':
-        return 'border-sky-600 text-sky-400 bg-sky-950/40';
-      case 'uncommon':
-        return 'border-emerald-600 text-emerald-400 bg-emerald-950/40';
-      default:
-        return 'border-neutral-700 text-neutral-400 bg-neutral-900/40';
-    }
-  };
+  // Nếu món đang chọn đã dùng hết thì bỏ chọn
+  useEffect(() => {
+    if (selectedId && !inventory.some((i) => i.id === selectedId)) setSelectedId(null);
+  }, [inventory, selectedId]);
+
+  const emptySlots = Math.max(0, SLOTS - items.length);
+
+  const isSpoiledItem = (i: Item) => i.category === 'food' && i.freshness !== undefined && i.freshness < 30;
+  const canUse = (i: Item) => i.category === 'medical' || i.category === 'food';
+  const canEquip = (i: Item) => i.category === 'weapon' || i.category === 'special';
+  const isEquipped = (i: Item) => equippedWeapon?.id === i.id || equippedArmor?.id === i.id;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm select-none">
-      <div className="w-full max-w-4xl bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[88vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 backdrop-blur-sm select-none sm:p-4">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-neutral-800 bg-neutral-950/80">
+        <div className="flex items-center justify-between border-b border-neutral-800 bg-neutral-950/80 p-3 sm:p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-neutral-800 text-neutral-200 rounded-lg">
-              <Package className="w-5 h-5 text-amber-500" />
-            </div>
+            <div className="rounded-lg bg-neutral-800 p-2 text-amber-500"><Package className="h-5 w-5" /></div>
             <div>
-              <h3 className="text-lg font-bold text-white tracking-wide">
-                BA LÔ SINH TỒN ({inventory.reduce((acc, i) => acc + i.quantity, 0)} Vật Phẩm)
-              </h3>
-              <p className="text-xs text-neutral-400">
-                Thực phẩm tươi sẽ bị ôi thiu dần theo thời gian nếu không được bảo quản hoặc nấu chín
-              </p>
+              <h3 className="text-base font-bold tracking-wide text-white sm:text-lg">BA LÔ SINH TỒN · {inventory.reduce((a, i) => a + i.quantity, 0)} món</h3>
+              <p className="text-[11px] text-neutral-400 sm:text-xs">Bấm vào một ô để xem nhanh mô tả và thao tác. Đồ tươi sẽ hỏng dần, đồ sống phải nấu chín.</p>
             </div>
           </div>
-
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {onOpenBaseWarehouse && (
-              <button
-                onClick={() => {
-                  sound.playClick();
-                  onOpenBaseWarehouse();
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-              >
-                <span>Kho Căn Cứ</span>
+              <button onClick={() => { sound.playClick(); onOpenBaseWarehouse(); }} className="cursor-pointer rounded-lg bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-700">
+                Kho Căn Cứ
               </button>
             )}
-
-            <button
-              onClick={() => {
-                sound.playClick();
-                onOpenCrafting();
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-md"
-            >
-              <Hammer className="w-3.5 h-3.5" />
-              <span>Chế Tạo</span>
+            <button onClick={() => { sound.playClick(); onOpenCrafting(); }} className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white shadow-md transition-colors hover:bg-amber-500">
+              <Hammer className="h-3.5 w-3.5" /><span>Chế Tạo</span>
             </button>
-
-            <button
-              onClick={onClose}
-              className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
+            <button onClick={onClose} className="cursor-pointer rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white" aria-label="Đóng">
+              <X className="h-5 w-5" />
             </button>
           </div>
         </div>
 
-        {/* Wound Alert Bar if player has open/inflamed/septic wound */}
         {wound.hasOpenWound && (
-          <div className="px-5 py-2.5 bg-red-950/70 border-b border-red-800 flex items-center justify-between text-xs text-red-200">
+          <div className="flex items-center justify-between gap-2 border-b border-red-800 bg-red-950/70 px-4 py-2 text-xs text-red-200">
             <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-400" />
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
               <span>
-                CẢNH BÁO VẾT THƯƠNG: <strong className="text-white">{wound.locationOnBody}</strong> (
-                {wound.status === 'open' ? 'Vết thương hở chưa xử lý' :
-                 wound.status === 'inflamed' ? 'Đang sưng tấy mưng mủ (Trừ tinh thần)' :
-                 'Đã nhiễm trùng máu (Khóa máu tối đa & Tăng nhiễm độc)'}
-                )
+                VẾT THƯƠNG: <strong className="text-white">{wound.locationOnBody}</strong> (
+                {wound.status === 'open' ? 'hở, chưa xử lý' : wound.status === 'inflamed' ? 'sưng tấy mưng mủ' : 'nhiễm trùng máu'})
               </span>
             </div>
-            <span className="text-[11px] font-mono text-red-300">
-              Hãy dùng Băng Gạc Sạch hoặc Thuốc Sát Trùng ngay!
-            </span>
+            <span className="hidden font-mono text-[11px] text-red-300 sm:inline">Dùng băng gạc hoặc cồn sát trùng ngay!</span>
           </div>
         )}
 
-        {/* Currently Equipped Equipment Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 bg-neutral-950/40 border-b border-neutral-800">
-          <div className="flex items-center gap-3 p-2.5 bg-neutral-900/70 border border-neutral-800 rounded-lg">
-            <div className="p-2 bg-red-950/50 text-red-400 border border-red-800/50 rounded">
-              <Swords className="w-4 h-4" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[10px] text-neutral-400 uppercase font-mono">Vũ Khí Cầm Tay</div>
-              <div className="text-xs font-semibold text-white truncate">
-                {equippedWeapon ? `${equippedWeapon.name} (Sát thương: ${equippedWeapon.damage || 20})` : 'Tay không'}
-              </div>
+        {/* Trang bị đang dùng */}
+        <div className="grid grid-cols-2 gap-2 border-b border-neutral-800 bg-neutral-950/40 p-3">
+          <div className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900/70 p-2">
+            <Swords className="h-4 w-4 shrink-0 text-red-400" />
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase text-neutral-400">Vũ khí</div>
+              <div className="truncate text-xs font-semibold text-white">{equippedWeapon ? `${equippedWeapon.name} (${equippedWeapon.damage || 20})` : 'Tay không'}</div>
             </div>
           </div>
-
-          <div className="flex items-center gap-3 p-2.5 bg-neutral-900/70 border border-neutral-800 rounded-lg">
-            <div className="p-2 bg-sky-950/50 text-sky-400 border border-sky-800/50 rounded">
-              <Shield className="w-4 h-4" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[10px] text-neutral-400 uppercase font-mono">Giáp Bảo Hộ</div>
-              <div className="text-xs font-semibold text-white truncate">
-                {equippedArmor ? `${equippedArmor.name} (Phòng thủ: +${equippedArmor.defense})` : 'Áo thường'}
-              </div>
+          <div className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900/70 p-2">
+            <Shield className="h-4 w-4 shrink-0 text-sky-400" />
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase text-neutral-400">Giáp / áo</div>
+              <div className="truncate text-xs font-semibold text-white">{equippedArmor ? `${equippedArmor.name} (+${equippedArmor.defense ?? 0})` : 'Áo thường'}</div>
             </div>
           </div>
         </div>
 
-        {/* Filter categories */}
-        <div className="flex flex-wrap gap-1.5 p-4 border-b border-neutral-800/80 bg-neutral-950/20">
-          {(['all', 'food', 'medical', 'weapon', 'material', 'tool', 'ammo'] as const).map((cat) => (
+        {/* Lọc */}
+        <div className="flex flex-wrap gap-1.5 border-b border-neutral-800/80 bg-neutral-950/20 p-3">
+          {FILTERS.map((cat) => (
             <button
               key={cat}
-              onClick={() => {
-                setFilterCategory(cat);
-                sound.playClick();
-              }}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
-                filterCategory === cat
-                  ? 'bg-neutral-200 text-neutral-900 shadow-sm'
-                  : 'bg-neutral-800/80 text-neutral-400 hover:text-white'
-              }`}
+              onClick={() => { setFilter(cat); sound.playClick(); }}
+              className={`cursor-pointer rounded px-3 py-1 text-xs font-medium transition-colors ${filter === cat ? 'bg-neutral-200 text-neutral-900' : 'bg-neutral-800/80 text-neutral-400 hover:text-white'}`}
             >
-              {cat === 'all' ? 'Tất cả' :
-               cat === 'food' ? 'Thức ăn / Nước' :
-               cat === 'medical' ? 'Y tế & Vết thương' :
-               cat === 'weapon' ? 'Vũ khí' :
-               cat === 'material' ? 'Vật liệu' :
-               cat === 'ammo' ? 'Đạn dược' : 'Công cụ'}
+              {CATEGORY_LABEL[cat]}
             </button>
           ))}
         </div>
 
-        {/* Items Grid */}
-        <div className="p-4 sm:p-5 overflow-y-auto flex-1">
-          {filteredItems.length === 0 ? (
-            <div className="text-center py-12 text-neutral-500 text-sm">
-              Không có vật phẩm nào trong ngăn này.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {filteredItems.map((item) => {
-                const isEquipped = equippedWeapon?.id === item.id || equippedArmor?.id === item.id;
-                const canUse = item.category === 'medical' || item.category === 'food';
-                const canEquip = item.category === 'weapon' || item.category === 'special';
-                const isFood = item.category === 'food';
-                const isSpoiled = item.freshness !== undefined && item.freshness < 30;
-
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row">
+          {/* Lưới ô vuông */}
+          <div className="flex-1 p-3 sm:p-4">
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-6">
+              {items.map((item) => {
+                const spoiled = isSpoiledItem(item);
+                const active = item.id === selectedId;
+                const fresh = item.category === 'food' && item.canSpoil && !item.isSealed && !item.isDried && item.freshness !== undefined;
                 return (
-                  <div
+                  <button
                     key={item.id}
-                    className={`p-3.5 bg-neutral-950/60 border rounded-lg flex flex-col justify-between transition-colors ${
-                      isSpoiled
-                        ? 'border-red-900/80 bg-red-950/20'
-                        : 'border-neutral-800 hover:border-neutral-700'
-                    }`}
+                    onClick={() => { sound.playClick(); setSelectedId(item.id); }}
+                    title={item.name}
+                    className={`relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border bg-neutral-950/70 p-1 transition-all hover:bg-neutral-800/80 ${RARITY_RING[item.rarity] || RARITY_RING.common} ${active ? 'ring-2 ring-amber-400' : ''} ${spoiled ? 'bg-red-950/30' : ''}`}
                   >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 mb-1.5">
-                        <span className="text-sm font-semibold text-white truncate">
-                          {item.name}
-                        </span>
-                        <span className="text-xs font-mono font-bold text-amber-400 px-1.5 py-0.5 bg-neutral-900 rounded">
-                          x{item.quantity}
-                        </span>
-                      </div>
-
-                      {/* Freshness / Spoilage Status */}
-                      {isFood && (
-                        <div className="mb-2">
-                          {item.isSealed ? (
-                            <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-800/60 px-1.5 py-0.5 rounded">
-                              Đồ hộp nguyên seal (Không hỏng)
-                            </span>
-                          ) : item.isDried ? (
-                            <span className="text-[10px] font-mono text-sky-400 bg-sky-950/40 border border-sky-800/60 px-1.5 py-0.5 rounded">
-                              Đã sấy khô (Bảo quản lâu dài)
-                            </span>
-                          ) : item.isCooked ? (
-                            <span className="text-[10px] font-mono text-amber-400 bg-amber-950/40 border border-amber-800/60 px-1.5 py-0.5 rounded">
-                              Đã nấu chín (Độ tươi: {item.freshness}%)
-                            </span>
-                          ) : item.freshness !== undefined ? (
-                            <div className="flex items-center justify-between text-[10px] font-mono">
-                              <span className="text-neutral-400">Độ tươi:</span>
-                              <span className={isSpoiled ? 'text-red-400 font-bold' : item.freshness < 60 ? 'text-amber-400' : 'text-emerald-400'}>
-                                {item.freshness}% {isSpoiled && '(ĐÃ ÔI THIU!)'}
-                              </span>
-                            </div>
-                          ) : null}
-                        </div>
-                      )}
-
-                      <p className="text-xs text-neutral-400 line-clamp-2 mb-3">
-                        {item.description}
-                      </p>
-
-                      {/* Stat effects tags */}
-                      <div className="flex flex-wrap gap-1.5 text-[11px] font-mono text-neutral-300 mb-3">
-                        {item.damage && <span className="text-red-400">⚔️ Công: {item.damage}</span>}
-                        {item.defense && <span className="text-sky-400">🛡️ Giáp: +{item.defense}</span>}
-                        {item.healAmount && <span className="text-emerald-400">❤️ Máu: +{item.healAmount}</span>}
-                        {item.hungerReduce && <span className="text-amber-400">🍖 No: +{item.hungerReduce}</span>}
-                        {item.thirstReduce && <span className="text-blue-400">💧 Khát: -{item.thirstReduce}</span>}
-                        {item.infectionReduce && <span className="text-teal-400">🧪 Độc: -{item.infectionReduce}%</span>}
-                      </div>
-
-                      {/* Warning if eating spoiled food */}
-                      {isSpoiled && (
-                        <div className="text-[10px] text-red-400 italic mb-2">
-                          ⚠️ Ăn đồ ôi thiu sẽ gây ngộ độc (+30% Nhiễm Độc, -20 HP)!
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-2 border-t border-neutral-800/80 flex flex-wrap items-center gap-1.5">
-                      {canUse && (
-                        <button
-                          onClick={() => {
-                            onUseItem(item);
-                          }}
-                          className={`flex-1 py-1 px-2 rounded text-xs font-medium transition-colors cursor-pointer ${
-                            isSpoiled
-                              ? 'bg-red-950 hover:bg-red-900 text-red-200 border border-red-700'
-                              : 'bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 border border-emerald-700'
-                          }`}
-                        >
-                          {isSpoiled ? 'Ăn (Rủi Ro Ngộ Độc)' : 'Sử Dụng'}
-                        </button>
-                      )}
-
-                      {/* Cook food action */}
-                      {isFood && item.canSpoil && !item.isCooked && !item.isDried && (
-                        <button
-                          onClick={() => {
-                            sound.playLoot();
-                            onCookFood(item);
-                          }}
-                          className="py-1 px-2 bg-amber-950/60 hover:bg-amber-900 text-amber-300 border border-amber-700 rounded text-xs font-medium transition-colors cursor-pointer"
-                          title="Nấu chín để tiệt trùng và tăng độ tươi"
-                        >
-                          <Flame className="w-3 h-3 inline mr-1" />
-                          <span>Nấu</span>
-                        </button>
-                      )}
-
-                      {/* Dry/Cure food action */}
-                      {isFood && item.canSpoil && !item.isDried && (
-                        <button
-                          onClick={() => {
-                            sound.playLoot();
-                            onDryFood(item);
-                          }}
-                          className="py-1 px-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 rounded text-xs font-medium transition-colors cursor-pointer"
-                          title="Ướp muối / sấy khô để bảo quản không hỏng"
-                        >
-                          <span>Sấy Khô</span>
-                        </button>
-                      )}
-
-                      {canEquip && (
-                        <button
-                          onClick={() => {
-                            sound.playClick();
-                            onEquipItem(item);
-                          }}
-                          className={`flex-1 py-1 px-2 rounded text-xs font-medium border transition-colors cursor-pointer ${
-                            isEquipped
-                              ? 'bg-neutral-800 border-neutral-700 text-neutral-400'
-                              : 'bg-red-950/60 hover:bg-red-900 text-red-200 border-red-700'
-                          }`}
-                        >
-                          {isEquipped ? 'Đang Dùng' : 'Trang Bị'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                    <span className="text-2xl leading-none sm:text-3xl">{itemIcon(item)}</span>
+                    <span className="mt-1 line-clamp-2 w-full text-center text-[9px] leading-tight text-neutral-300 sm:text-[10px]">{item.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}</span>
+                    <span className="absolute right-1 top-1 rounded bg-black/70 px-1 font-mono text-[10px] font-bold text-amber-400">x{item.quantity}</span>
+                    {isEquipped(item) && <span className="absolute left-1 top-1 rounded bg-red-700 px-1 text-[8px] font-bold text-white">ĐANG DÙNG</span>}
+                    {fresh && (
+                      <span className="absolute bottom-0.5 left-1 right-1 h-1 overflow-hidden rounded bg-neutral-800">
+                        <span className={`block h-full ${spoiled ? 'bg-red-500' : (item.freshness as number) < 60 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${item.freshness}%` }} />
+                      </span>
+                    )}
+                  </button>
                 );
               })}
+              {Array.from({ length: emptySlots }).map((_, i) => (
+                <div key={`empty-${i}`} className="aspect-square rounded-lg border border-dashed border-neutral-800/80 bg-neutral-950/30" />
+              ))}
             </div>
-          )}
+          </div>
+
+          {/* Mô tả nhanh */}
+          <aside className="w-full shrink-0 border-t border-neutral-800 bg-neutral-950/50 p-4 lg:w-80 lg:border-l lg:border-t-0">
+            {!selected ? (
+              <div className="py-10 text-center text-xs leading-relaxed text-neutral-500">
+                Chạm vào một ô để xem mô tả nhanh, chỉ số và các thao tác (dùng, nấu, sấy khô, trang bị).
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border bg-neutral-950 text-3xl ${RARITY_RING[selected.rarity] || RARITY_RING.common}`}>{itemIcon(selected)}</div>
+                  <div className="min-w-0">
+                    <h4 className="text-sm font-bold leading-tight text-white">{selected.name}</h4>
+                    <div className={`mt-0.5 font-mono text-[10px] uppercase ${RARITY_TEXT[selected.rarity] || RARITY_TEXT.common}`}>
+                      {RARITY_NAME[selected.rarity] || 'Thường'} · {CATEGORY_LABEL[selected.category] || selected.category} · x{selected.quantity}
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-xs leading-relaxed text-neutral-300">{selected.description || 'Chưa có mô tả.'}</p>
+
+                <ul className="space-y-1 text-[11px] font-mono text-neutral-200">
+                  {quickFacts(selected).map((f) => (
+                    <li key={f} className="flex items-center gap-1.5"><span className="text-amber-500">▸</span>{f}</li>
+                  ))}
+                </ul>
+
+                {isSpoiledItem(selected) && (
+                  <div className="rounded border border-red-900 bg-red-950/40 p-2 text-[11px] italic text-red-300">Đã ôi thiu: ăn vào sẽ ngộ độc (+30% nhiễm độc, -20 máu).</div>
+                )}
+                {selected.needsCooking && !selected.isCooked && (
+                  <div className="rounded border border-amber-900 bg-amber-950/30 p-2 text-[11px] text-amber-300">Dùng sống sẽ no ít hơn và hại bụng. Hãy nấu chín trước.</div>
+                )}
+
+                <div className="flex flex-wrap gap-2 border-t border-neutral-800 pt-3">
+                  {canUse(selected) && (
+                    <button
+                      onClick={() => onUseItem(selected)}
+                      className={`flex-1 cursor-pointer rounded border px-3 py-1.5 text-xs font-semibold transition-colors ${isSpoiledItem(selected) ? 'border-red-700 bg-red-950 text-red-200 hover:bg-red-900' : 'border-emerald-700 bg-emerald-900/60 text-emerald-200 hover:bg-emerald-800'}`}
+                    >
+                      {selected.category === 'food' ? (selected.thirstReduce && !selected.hungerReduce ? 'Uống' : 'Ăn') : 'Dùng'}
+                    </button>
+                  )}
+                  {selected.category === 'food' && (selected.needsCooking || selected.canSpoil) && !selected.isCooked && !selected.isDried && (
+                    <button onClick={() => { sound.playLoot(); onCookFood(selected); }} className="flex cursor-pointer items-center gap-1 rounded border border-amber-700 bg-amber-950/60 px-3 py-1.5 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-900">
+                      <Flame className="h-3.5 w-3.5" />Nấu
+                    </button>
+                  )}
+                  {selected.category === 'food' && selected.canSpoil && !selected.isDried && (
+                    <button onClick={() => { sound.playLoot(); onDryFood(selected); }} className="cursor-pointer rounded border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-semibold text-neutral-200 transition-colors hover:bg-neutral-700">
+                      Sấy khô
+                    </button>
+                  )}
+                  {canEquip(selected) && (
+                    <button
+                      onClick={() => { sound.playClick(); onEquipItem(selected); }}
+                      className={`flex-1 cursor-pointer rounded border px-3 py-1.5 text-xs font-semibold transition-colors ${isEquipped(selected) ? 'border-neutral-700 bg-neutral-800 text-neutral-400' : 'border-red-700 bg-red-950/60 text-red-200 hover:bg-red-900'}`}
+                    >
+                      {isEquipped(selected) ? 'Đang dùng' : 'Trang bị'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </aside>
         </div>
       </div>
     </div>

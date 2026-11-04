@@ -4,6 +4,7 @@ import { sound } from '../utils/audio';
 
 interface TitleScreenProps {
   onStartGame: () => void;
+  onContinueGame?: () => void;
   onOpenChronicle?: () => void;
   audioEnabled: boolean;
   onToggleAudio: () => void;
@@ -12,6 +13,7 @@ interface TitleScreenProps {
 
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   onStartGame,
+  onContinueGame,
   onOpenChronicle,
   audioEnabled,
   onToggleAudio,
@@ -119,6 +121,20 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             <Play className="w-5 h-5 fill-white" />
             <span className="text-base tracking-wide">BƯỚC VÀO VÙNG ĐẤT CHẾT</span>
           </button>
+
+          {onContinueGame && (
+            <button
+              onClick={() => {
+                sound.startAmbientSoundscape('dense_fog', 2);
+                sound.playClick();
+                onContinueGame();
+              }}
+              className="flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3.5 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-200 border border-emerald-700/80 rounded-lg transition-colors cursor-pointer text-sm font-semibold"
+            >
+              <Play className="w-4 h-4" />
+              <span>TIẾP TỤC VÁN ĐANG CHƠI</span>
+            </button>
+          )}
 
           {onOpenChronicle && (
             <button

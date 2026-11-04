@@ -3,6 +3,7 @@ import { Navigation, Clock, ShieldAlert, X, Footprints, Eye, Lock } from 'lucide
 import { WeatherType } from '../types/game';
 import { HOME_NODE_ID, KIND_ICON, NODE_BY_ID, REGION_LABEL, RING_RX, RING_Y_RATIO, WORLD_NODES, WorldNode, knownNodes, revealedNodes, shortestPath } from '../data/worldMap';
 import { sound } from '../utils/audio';
+import { Vehicle, VEHICLES, fuelNeededRoundTrip } from '../data/vehicles';
 
 interface DynamicMapModalProps {
   visitedNodes: string[];
@@ -10,7 +11,13 @@ interface DynamicMapModalProps {
   weather: WeatherType;
   stamina: number;
   homeName: string;
-  onTravel: (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number) => void;
+  extraNodes: WorldNode[];           // cứ điểm ngẫu nhiên của ván này
+  baseNodeId?: string;               // cứ điểm đang dùng làm căn cứ
+  hasBase: boolean;
+  onClaimBase?: (node: WorldNode) => void;
+  vehicle: Vehicle | null;
+  crewAvailable: number;
+  onTravel: (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number, opts: { useVehicle: boolean; crew: number }) => void;
   onClose: () => void;
 }
 
@@ -27,31 +34,54 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
   weather,
   stamina,
   homeName,
+  extraNodes,
+  baseNodeId,
+  hasBase,
+  onClaimBase,
+  vehicle,
+  crewAvailable,
   onTravel,
   onClose,
 }) => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [useVehicle, setUseVehicle] = useState(true);
+  const [crew, setCrew] = useState(0);
 
-  const visible = useMemo(() => revealedNodes(visitedNodes), [visitedNodes]);
-  const known = useMemo(() => knownNodes(visitedNodes), [visitedNodes]);
+  const allNodes = useMemo(() => [...WORLD_NODES, ...extraNodes], [extraNodes]);
+  const reg = useMemo(() => Object.fromEntries(allNodes.map((n) => [n.id, n])) as Record<string, WorldNode>, [allNodes]);
+  const visible = useMemo(() => revealedNodes(visitedNodes, extraNodes), [visitedNodes, extraNodes]);
+  const known = useMemo(() => knownNodes(visitedNodes, extraNodes), [visitedNodes, extraNodes]);
   const home = NODE_BY_ID[HOME_NODE_ID];
 
-  const selected = selectedId ? NODE_BY_ID[selectedId] : null;
-  const path = useMemo(() => (selected ? shortestPath(HOME_NODE_ID, selected.id) : []), [selected]);
+  const selected = selectedId ? reg[selectedId] : null;
+  const path = useMemo(() => (selected ? shortestPath(HOME_NODE_ID, selected.id, extraNodes) : []), [selected, extraNodes]);
   const hops = Math.max(0, path.length - 1);
   const pathEdges = new Set(path.slice(1).map((id, i) => [path[i], id].sort().join('|')));
 
   const rainy = weather === 'heavy_rain' || weather === 'freezing_cold';
+  // Xe cộ: nhẹ sức hơn nhiều nhưng tốn xăng; hết xăng/hỏng thì tự động phải đi bộ
+  const vdef = vehicle ? VEHICLES[vehicle.kind] : null;
+  const needFuel = vdef ? fuelNeededRoundTrip(vdef.kind, hops) : 0;
+  const vehicleOk = !!vehicle && !!vdef && vehicle.condition > 0 && vehicle.fuel >= needFuel;
+  const riding = useVehicle && vehicleOk;
+  const maxCrew = riding && vdef ? Math.min(vdef.crew, crewAvailable) : 0;
+  const blockedByDistance = !!selected?.needsVehicle && !riding;
   const staminaCost = (style: 'quick' | 'thorough') => {
-    const base = 6 * hops + (style === 'thorough' ? 9 : 3);
-    return rainy ? Math.round(base * 1.2) : base;
+    const base = (6 * hops + (style === 'thorough' ? 9 : 3)) * (riding && vdef ? vdef.speed : 1);
+    return rainy ? Math.round(base * 1.2) : Math.round(base);
   };
   const visits = selected ? visitCounts[selected.id] || 0 : 0;
 
   const edges: [WorldNode, WorldNode][] = [];
-  WORLD_NODES.forEach((a) => {
+  const edgeSeen = new Set<string>();
+  allNodes.forEach((a) => {
     a.connections.forEach((cid) => {
-      if (a.id < cid) edges.push([a, NODE_BY_ID[cid]]);
+      const b = reg[cid];
+      const key = [a.id, cid].sort().join('|');
+      if (b && !edgeSeen.has(key)) {
+        edgeSeen.add(key);
+        edges.push([a, b]);
+      }
     });
   });
 
@@ -83,13 +113,13 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row">
           {/* Map canvas */}
           <div className="relative flex-1 bg-neutral-950 p-2 sm:p-3">
-            <svg viewBox="0 0 100 70" className="h-auto w-full rounded-lg border border-neutral-800 bg-[#0b0f0e]" role="img" aria-label="Sơ đồ bản đồ khu vực">
+            <svg viewBox="0 0 100 70" className="h-auto w-full rounded-lg border border-neutral-800 bg-[#17130d]" role="img" aria-label="Sơ đồ bản đồ khu vực">
               <defs>
                 <pattern id="grid" width="5" height="5" patternUnits="userSpaceOnUse">
-                  <path d="M 5 0 L 0 0 0 5" fill="none" stroke="#1b2422" strokeWidth="0.15" />
+                  <path d="M 5 0 L 0 0 0 5" fill="none" stroke="#2d2518" strokeWidth="0.15" />
                 </pattern>
                 <radialGradient id="fog" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#0b0f0e" stopOpacity="0" />
+                  <stop offset="0%" stopColor="#17130d" stopOpacity="0" />
                   <stop offset="100%" stopColor="#000" stopOpacity="0.55" />
                 </radialGradient>
               </defs>
@@ -102,7 +132,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                 const ly = home.y + rg.r * RING_Y_RATIO * Math.sin(Math.PI / 3);
                 return (
                   <g key={rg.r}>
-                    <ellipse cx={home.x} cy={home.y} rx={rg.r} ry={rg.r * RING_Y_RATIO} fill="none" stroke="#2a3a36" strokeWidth="0.25" strokeDasharray="1.2 1.2" />
+                    <ellipse cx={home.x} cy={home.y} rx={rg.r} ry={rg.r * RING_Y_RATIO} fill="none" stroke="#54452d" strokeWidth="0.25" strokeDasharray="1.2 1.2" />
                     <text x={lx} y={ly} textAnchor="middle" fontSize="1.7" fill="#5b756b" letterSpacing="0.2">
                       {rg.label}
                     </text>
@@ -123,7 +153,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                     y1={a.y}
                     x2={b.x}
                     y2={b.y}
-                    stroke={onPath ? '#38bdf8' : bothKnown ? '#44574f' : '#26302d'}
+                    stroke={onPath ? '#e0a04a' : bothKnown ? '#85704c' : '#3a3022'}
                     strokeWidth={onPath ? 0.9 : 0.45}
                     strokeDasharray={bothKnown ? undefined : '1 1'}
                     strokeLinecap="round"
@@ -132,7 +162,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
               })}
 
               {/* Các điểm */}
-              {WORLD_NODES.map((n) => {
+              {allNodes.map((n) => {
                 if (!visible.has(n.id)) return null;
                 const isKnown = known.has(n.id);
                 const isHome = n.id === HOME_NODE_ID;
@@ -151,15 +181,17 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                     role={isHome ? undefined : 'button'}
                     aria-label={isKnown ? n.name : 'Địa điểm chưa rõ'}
                   >
+                    {n.outpost && <circle cx={n.x} cy={n.y} r="4" fill="none" stroke="#fbbf24" strokeWidth="0.35" strokeDasharray="0.9 0.9" />}
+                    {n.id === baseNodeId && <text x={n.x - 3.2} y={n.y - 2.6} fontSize="3" style={{ pointerEvents: 'none' }}>🏠</text>}
                     {isSel && <circle cx={n.x} cy={n.y} r="4.6" fill="none" stroke="#38bdf8" strokeWidth="0.4" />}
-                    <circle cx={n.x} cy={n.y} r={isHome ? 3.6 : 3} fill="#0f1513" stroke={color} strokeWidth={isHome ? 0.7 : 0.5} />
+                    <circle cx={n.x} cy={n.y} r={isHome ? 3.6 : 3} fill="#1b150d" stroke={color} strokeWidth={isHome ? 0.7 : 0.5} />
                     <text x={n.x} y={n.y + 1.1} textAnchor="middle" fontSize="3" style={{ pointerEvents: 'none' }}>
                       {isKnown ? KIND_ICON[n.kind] : '❔'}
                     </text>
                     {wasVisited && (
                       <circle cx={n.x + 2.6} cy={n.y - 2.6} r="1" fill="#34d399" stroke="#0f1513" strokeWidth="0.25" />
                     )}
-                    <text x={n.x} y={n.y + (!isHome && n.y < home.y ? -4.6 : 6)} textAnchor="middle" fontSize="2.2" fill={isKnown ? '#cbd5d0' : '#64706b'} style={{ pointerEvents: 'none' }}>
+                    <text x={n.x} y={n.y + (!isHome && n.y < home.y ? -4.6 : 6)} textAnchor="middle" fontSize="2.2" fill={isKnown ? '#d9c8a0' : '#6d6048'} style={{ pointerEvents: 'none' }}>
                       {isKnown ? (isHome ? homeName.slice(0, 22) : n.name.split(' - ')[0].slice(0, 22)) : 'Chưa rõ'}
                     </text>
                   </g>
@@ -215,7 +247,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                       Bạn mới chỉ thấy tín hiệu mờ ở hướng này. Hãy ghé một điểm kề nó (
                       {selected.connections
                         .filter((c) => known.has(c) && c !== HOME_NODE_ID)
-                        .map((c) => NODE_BY_ID[c].name.split(' - ')[0])
+                        .map((c) => reg[c]?.name.split(' - ')[0])
                         .join(', ') || 'điểm gần hơn'}
                       ) để khám phá.
                     </span>
@@ -251,12 +283,59 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                       {visits > 0 && <div className="mt-1 text-[10px] text-amber-400">Đã ghé {visits} lần nên vật tư còn ít hơn.</div>}
                     </div>
 
+                    {selected.outpost && (
+                      <div className="space-y-2 rounded-lg border border-amber-800/60 bg-amber-950/20 p-3">
+                        <div className="flex items-center justify-between text-[11px] font-mono text-amber-300">
+                          <span>CỨ ĐIỂM TIỀM NĂNG</span>
+                          <span>Độ phù hợp làm căn cứ: {selected.outpost.baseScore}/100</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded bg-neutral-900"><div className="h-full bg-amber-500" style={{ width: `${selected.outpost.baseScore}%` }} /></div>
+                        <ul className="space-y-0.5 text-[11px] text-emerald-300">{selected.outpost.pros.map((p) => (<li key={p}>＋ {p}</li>))}</ul>
+                        <ul className="space-y-0.5 text-[11px] text-red-300">{selected.outpost.cons.map((p) => (<li key={p}>－ {p}</li>))}</ul>
+                        {Object.keys(selected.outpost.bonus).length > 0 && <div className="text-[10px] text-neutral-400">Có sẵn công trình khi chiếm: {Object.entries(selected.outpost.bonus).map(([k, v]) => `${k} cấp ${v}`).join(', ')}</div>}
+                        {onClaimBase && (
+                          <button
+                            disabled={visits === 0 || baseNodeId === selected.id}
+                            onClick={() => { sound.playLoot(); onClaimBase(selected); }}
+                            className="w-full cursor-pointer rounded border border-amber-600 bg-amber-700/70 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {baseNodeId === selected.id ? 'Đang là căn cứ của bạn' : visits === 0 ? 'Hãy tới lục soát một lần trước khi chiếm' : hasBase ? 'Chuyển căn cứ tới đây' : 'Chiếm làm căn cứ'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {(vehicle || selected.needsVehicle) && (
+                      <div className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/20 p-3 text-[11px]">
+                        {selected.needsVehicle && <div className={riding ? 'text-emerald-300' : 'text-amber-300'}>{riding ? 'Nơi này quá xa, bạn đi bằng xe.' : 'Nơi này quá xa để đi bộ. Cần một chiếc xe còn xăng.'}</div>}
+                        {vehicle && vdef && (
+                          <>
+                            <label className="flex cursor-pointer items-center gap-2 text-neutral-200">
+                              <input type="checkbox" checked={useVehicle} onChange={(e) => setUseVehicle(e.target.checked)} />
+                              <span>{vdef.icon} Đi bằng {vdef.name.toLowerCase()} (xăng {Math.round(vehicle.fuel)}/{vdef.maxFuel}, độ bền {Math.round(vehicle.condition)}%)</span>
+                            </label>
+                            {useVehicle && !vehicleOk && <div className="text-red-300">{vehicle.condition <= 0 ? 'Xe hỏng nặng, cần sửa trước.' : `Cần ${needFuel} xăng cho cả đi lẫn về, xe chỉ còn ${Math.round(vehicle.fuel)}.`}</div>}
+                            {riding && needFuel > 0 && <div className="text-neutral-400">Tốn khoảng {needFuel} xăng · tiếng ồn mức {vdef.noise}/4 · giáp {vdef.armor}</div>}
+                            {riding && maxCrew > 0 && (
+                              <div className="flex items-center gap-2 text-neutral-200">
+                                <span>Chở đồng đội:</span>
+                                {Array.from({ length: maxCrew + 1 }).map((_, i) => (
+                                  <button key={i} onClick={() => setCrew(i)} className={`cursor-pointer rounded border px-2 py-0.5 ${Math.min(crew, maxCrew) === i ? 'border-sky-400 bg-sky-900/60 text-white' : 'border-neutral-700 text-neutral-400'}`}>{i}</button>
+                                ))}
+                                <span className="text-neutral-500">(mang thêm đồ, giảm thiệt hại, ăn thêm)</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 gap-2 border-t border-neutral-800 pt-3">
                       <button
-                        disabled={stamina < staminaCost('quick')}
+                        disabled={stamina < staminaCost('quick') || blockedByDistance}
                         onClick={() => {
                           sound.playClick();
-                          onTravel(selected, 'quick', hops);
+                          onTravel(selected, 'quick', hops, { useVehicle: riding, crew: Math.min(crew, maxCrew) });
                         }}
                         className="flex cursor-pointer flex-col rounded bg-neutral-800 px-3 py-2 text-left text-xs transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40"
                       >
@@ -264,10 +343,10 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                         <span className="text-[10px] text-neutral-400">Ít tiếng động · tốn ~{staminaCost('quick')} thể lực</span>
                       </button>
                       <button
-                        disabled={stamina < staminaCost('thorough')}
+                        disabled={stamina < staminaCost('thorough') || blockedByDistance}
                         onClick={() => {
                           sound.playClick();
-                          onTravel(selected, 'thorough', hops);
+                          onTravel(selected, 'thorough', hops, { useVehicle: riding, crew: Math.min(crew, maxCrew) });
                         }}
                         className="flex cursor-pointer flex-col rounded border border-red-800/80 bg-red-950/60 px-3 py-2 text-left text-xs transition-colors hover:bg-red-900 disabled:cursor-not-allowed disabled:opacity-40"
                       >

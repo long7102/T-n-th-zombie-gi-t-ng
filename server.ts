@@ -3,14 +3,16 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
+import { aiAvailable, aiStatus, generateJson, initProviders, parseJsonLoose } from './aiProviders.ts';
 import { RANDOM_EVENTS, REALISTIC_SURVIVOR_ROSTER } from './src/data/randomEvents.ts';
 import { STORY_MILESTONES } from './src/data/storyBranches.ts';
 import { STARTING_SCENARIOS } from './src/data/startingScenarios.ts';
 import { BackgroundEffectType } from './src/types/game.ts';
-import { applyWeatherToStats, makeForecast, planTurn, renderOfflineTurn } from './src/data/storyDirector.ts';
+import { applyWeatherToStats, makeForecast, openingScene, planTurn, renderOfflineTurn } from './src/data/storyDirector.ts';
 import { buildRadioTransmission, isFutureTrigger } from './src/data/radio.ts';
-import { buildTurnPrompt } from './src/data/turnPrompt.ts';
+import { buildCustomPrompt, buildTurnPrompt } from './src/data/turnPrompt.ts';
+import { getSetting, locationText, zoneLabel } from './src/data/settings.ts';
+import { buildChatPrompt, offlineChat, sanitizeChat, ChatReq } from './src/data/companionChat.ts';
 
 dotenv.config();
 
@@ -21,25 +23,15 @@ const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Initialize GoogleGenAI SDK as per gemini-api skill
-const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = apiKey
-  ? new GoogleGenAI({
-      apiKey: apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    })
-  : null;
+// Luân phiên nhiều khóa API (Gemini / OpenAI / Claude). Hết khóa thì dùng kịch bản offline.
+initProviders();
 
 // Health / Status endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
-    hasApiKey: !!apiKey,
-    model: 'gemini-3.8-flash',
+    hasApiKey: aiAvailable(),
+    ai: aiStatus(),
   });
 });
 
@@ -54,27 +46,32 @@ const WEATHER_EFFECT_MAP: Record<string, { label: string; effect: BackgroundEffe
 };
 
 // Thông tin chung cho lượt khởi đầu: dự báo, bản tin radio đầu tiên và mã cảnh.
-function startExtras(weatherKey: string) {
+function startExtras(weatherKey: string, scenarioId?: string, seenBefore?: Record<string, number>) {
   const forecast = makeForecast(weatherKey as any);
+  const opening = openingScene(scenarioId, seenBefore);
   const trigger = `Forecast: ${forecast.weather}`;
   return {
     tomorrowForecast: forecast,
     system_trigger: trigger,
     radio_transmission: buildRadioTransmission([{ kind: 'weather', weather: forecast.weather }], { baseType: 'Apartment', day: 1 }),
-    scene_id: 'r_start',
+    scene_id: opening.sceneId,
+    choices: opening.choices,
+    zone: opening.zone,
+    settingId: opening.settingId,
+    awayTurns: 0,
     pending_events: [],
   };
 }
 
 // Start Game Endpoint
 app.post('/api/story/start', async (req: Request, res: Response) => {
-  const { player, scenarioId, customPrompt } = req.body;
-  const playerName = player?.name || 'Kẻ Sinh Tồn';
+  const { player, scenarioId, customPrompt, seenBefore } = req.body;
+  const playerName = 'Người sống sót chưa ai biết tên';
 
   const preset = STARTING_SCENARIOS.find(s => s.id === scenarioId);
 
   // If user provided a custom prompt and Gemini AI is active:
-  if (customPrompt && customPrompt.trim() && ai) {
+  if (customPrompt && customPrompt.trim() && aiAvailable()) {
     try {
       const prompt = `Bạn là Quản trò Game Master AI của tựa game RPG sinh tồn Zombie thực tế "Hồi Kết Zombie: Kỷ Nguyên Sinh Tồn".
 NGÔN NGỮ: 100% TIẾNG VIỆT TRƠN TRU, RÕ RÀNG, ỔN ĐỊNH.
@@ -118,15 +115,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ:
   "soundCue": "zombie_growl"
 }`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
-
-      const parsed = JSON.parse(response.text || '{}');
+      const gen = await generateJson(prompt);
+    const parsed = parseJsonLoose(gen.text);
       const wKey = parsed.weather || 'dense_fog';
       const wInfo = WEATHER_EFFECT_MAP[wKey] || WEATHER_EFFECT_MAP.dense_fog;
 
@@ -135,7 +125,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ:
         location: parsed.location || 'Khu vực trú ẩn ban đầu',
         weather: wKey,
         weatherLabel: parsed.weatherLabel || wInfo.label,
-        ...startExtras(wKey),
+        ...startExtras(wKey, scenarioId, seenBefore),
+        scene_id: 'ai_start',
         background_effect: parsed.background_effect || wInfo.effect,
         startingHp: parsed.startingHp || 90,
         startingStamina: parsed.startingStamina || 90,
@@ -166,21 +157,16 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ:
 
   return res.json({
     situation: enrichedSituation,
-    location: chosenPreset.startingLocation,
     weather: chosenPreset.initialWeather,
     weatherLabel: chosenPreset.weatherLabel,
-    ...startExtras(chosenPreset.initialWeather),
+    ...startExtras(chosenPreset.initialWeather, chosenPreset.id, seenBefore),
+    location: locationText(getSetting(chosenPreset.id), 'shelter'),
     background_effect: wInfo.effect,
     startingHp: chosenPreset.startingHp,
     startingStamina: chosenPreset.startingStamina,
     startingSanity: chosenPreset.startingSanity,
     initialSkills: chosenPreset.initialSkills,
     calculatedItems: chosenPreset.initialItems,
-    choices: [
-      'Lục soát xung quanh để thu thập thức ăn và vật dụng y tế',
-      'Tìm vật liệu gia cố cửa nẻo chặn đường bầy quái',
-      'Thăm dò các lối thoát hiểm bí mật',
-    ],
     customChoiceAllowed: true,
     dangerLevel: 2,
     soundCue: 'zombie_growl',
@@ -202,7 +188,7 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
     background_effect: wInfo.effect,
   };
 
-  if (!ai) return res.json(base);
+  if (!aiAvailable()) return res.json({ ...base, ai_note: 'offline' });
 
   try {
     const player = body.player;
@@ -216,10 +202,12 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
 
     const globalState = {
       day: plan.nextDay,
-      current_location: body.currentLocation || 'Khu nhà bỏ hoang',
+      current_location: plan.location,
+      lasting_consequences: body.flags || [],
+      world_summary: typeof body.worldSummary === 'string' ? body.worldSummary.slice(0, 2600) : undefined,
       base_location: baseLocationType,
       character: {
-        name: player?.name || 'Kẻ Sinh Tồn',
+        name: 'Người sống sót (chưa ai biết tên)',
         origin: player?.backgroundTitle || 'Dân thường',
         hp: player?.stats?.hp,
         max_hp: player?.stats?.maxHp,
@@ -242,7 +230,9 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
       companions: companions.map((c: any) => ({ name: c.name, role: c.role, hp: c.hp, morale: c.morale, trust: c.trust, affection: c.affection || 0, status: c.status })),
     };
 
-    const prompt = buildTurnPrompt({
+    const customMode = body.actionType === 'custom' && plan.resolution.kind === 'custom' && !plan.resolution.failed && plan.next.kind === 'routine';
+    const setting = getSetting(plan.settingId);
+    const promptArgs = {
       chosenAction: (body.chosenAction || '').replace(/^\[MAP_TRAVEL\].*?::\s*/s, ''),
       actionType: body.actionType || 'choice',
       day: plan.day,
@@ -259,16 +249,18 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
       nextSceneSituation: plan.next.situation,
       nextChoices: plan.next.choices,
       radioDraft: plan.radio,
-    });
+      zoneLabel: zoneLabel(setting, plan.zone),
+      placeName: setting.place,
+    };
+    const prompt = customMode ? buildCustomPrompt(promptArgs) : buildTurnPrompt(promptArgs);
+    let aiProvider = '';
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: { responseMimeType: 'application/json' },
-    });
-    const parsed = JSON.parse(response.text || '{}');
+    const gen = await generateJson(prompt);
+    const parsed = parseJsonLoose(gen.text);
+    aiProvider = gen.provider;
 
     const det = plan.resolution.deterministic;
+    const lockMech = det || customMode; // cơ chế (chỉ số, vật phẩm) do hệ thống quyết định, AI chỉ kể lại
     const clamp = (v: any, lim: number, d = 0) => (typeof v === 'number' && isFinite(v) ? Math.max(-lim, Math.min(lim, Math.round(v))) : d);
     const aiStats = parsed.statChanges
       ? applyWeatherToStats({
@@ -286,7 +278,7 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
         .slice(0, 4)
         .map((i: any, n: number) => ({ rarity: 'common', description: '', category: 'material', ...i, quantity: Math.max(1, Math.min(5, Number(i.quantity) || 1)), id: `ai_${Date.now().toString(36)}_${n}` }));
 
-    const aiGained = det ? base.itemsGained : sanitizeItems(parsed.itemsGained);
+    const aiGained = lockMech ? base.itemsGained : sanitizeItems(parsed.itemsGained);
     const aiRadio = typeof parsed.radio_transmission === 'string' && parsed.radio_transmission.trim().length > 20 ? parsed.radio_transmission : null;
     const hasFuture = isFutureTrigger(plan.systemTrigger);
 
@@ -294,10 +286,14 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
       ...base,
       outcome: det ? (typeof parsed.outcome === 'string' && parsed.outcome.startsWith(plan.resolution.outcome.slice(0, 20)) ? parsed.outcome : base.outcome) : (parsed.outcome || base.outcome),
       situation: typeof parsed.situation === 'string' && parsed.situation.length > 60 ? parsed.situation : base.situation,
-      statChanges: det ? base.statChanges : aiStats,
-      woundChange: det ? base.woundChange : parsed.woundChange || null,
+      // Hành động tự nhập: AI dựng tình huống + 3 lựa chọn mới bám sát văn bản người chơi gõ (chỉ khi hợp lệ).
+      ...(customMode && Array.isArray(parsed.choices) && parsed.choices.length === 3 && parsed.choices.every((c: any) => typeof c === 'string' && c.trim().length > 5)
+        ? { choices: parsed.choices.map((c: string) => c.trim()), scene_id: `ai_${body.turnCount ?? 0}` }
+        : {}),
+      statChanges: lockMech ? base.statChanges : aiStats,
+      woundChange: lockMech ? base.woundChange : parsed.woundChange || null,
       itemsGained: aiGained,
-      itemsLost: det ? base.itemsLost : Array.isArray(parsed.itemsLost) ? parsed.itemsLost : [],
+      itemsLost: lockMech ? base.itemsLost : Array.isArray(parsed.itemsLost) ? parsed.itemsLost : [],
       loot_notification: aiGained.map((g: any) => `${g.name} x${g.quantity}`),
       companionUpdates: Array.isArray(parsed.companionUpdates) && parsed.companionUpdates.length ? parsed.companionUpdates : base.companionUpdates,
       newSkill: base.newSkill || parsed.newSkill || undefined,
@@ -305,18 +301,39 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
       // Radio: bản của Gemini nếu có, nếu không dùng bản dựng sẵn; không phát khi không có thông tin tương lai.
       radio_transmission: hasFuture ? aiRadio || base.radio_transmission : null,
       soundCue: parsed.soundCue || base.soundCue,
+      ai_note: aiProvider,
     });
   } catch (err: any) {
-    console.error('Error in /api/story/turn with Gemini:', err?.message);
-    return res.json(base);
+    console.error('Error in /api/story/turn with AI:', err?.message);
+    // Hết token ở mọi nhà cung cấp (hoặc AI lỗi): chuyển sang kịch bản offline, game vẫn chơi tiếp được.
+    return res.json({ ...base, ai_note: (err as any)?.exhausted ? 'exhausted' : 'offline' });
   }
+});
+
+// Trò chuyện với đồng đội: AI (nếu còn khóa) hoặc engine offline phân tích câu người chơi gõ.
+app.post('/api/companion/chat', async (req: Request, res: Response) => {
+  const body = req.body as ChatReq;
+  if (!body?.companion || !body?.player || typeof body.text !== 'string' || !body.text.trim()) {
+    return res.status(400).json({ error: 'Thiếu dữ liệu trò chuyện' });
+  }
+  body.text = body.text.slice(0, 400);
+  if (aiAvailable()) {
+    try {
+      const gen = await generateJson(buildChatPrompt(body));
+      const clean = sanitizeChat(parseJsonLoose(gen.text), body);
+      if (clean) return res.json({ ...clean, ai_note: gen.provider });
+    } catch (err: any) {
+      console.warn('Chat AI lỗi, dùng engine offline:', err?.message);
+    }
+  }
+  return res.json({ ...offlineChat(body), ai_note: 'offline' });
 });
 
 // Custom Crafting evaluation endpoint
 app.post('/api/story/craft', async (req: Request, res: Response) => {
   const { itemName, materials, description } = req.body;
 
-  if (!ai) {
+  if (!aiAvailable()) {
     return res.json({
       success: true,
       resultItem: {
@@ -357,15 +374,8 @@ Trả về JSON duy nhất:
   "evaluation": "Nhận xét thực tế của AI về độ bền và tính thực dụng..."
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
+    const gen = await generateJson(prompt);
+    const parsed = parseJsonLoose(gen.text);
     return res.json({
       success: true,
       resultItem: {

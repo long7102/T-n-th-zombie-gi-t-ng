@@ -56,7 +56,8 @@ export const CharacterCreator: React.FC<CharacterCreatorProps> = ({ onComplete, 
     if (mode === 'custom' && customPrompt.trim()) {
       // Custom mode: Send custom background to AI for dynamic stat/inventory calculation
       const customChar: PlayerCharacter = {
-        name: name.trim() || 'Kẻ Sinh Tồn',
+        name: 'Người sống sót',
+        nameKnown: false,
         gender,
         background: 'custom_background',
         backgroundTitle: 'Tự Nhập Bối Cảnh',
@@ -85,7 +86,8 @@ export const CharacterCreator: React.FC<CharacterCreatorProps> = ({ onComplete, 
     } else {
       // Preset mode
       const presetChar: PlayerCharacter = {
-        name: name.trim() || 'Kẻ Sinh Tồn',
+        name: 'Người sống sót',
+        nameKnown: false,
         gender,
         background: currentScenario.id,
         backgroundTitle: currentScenario.subtitle,
@@ -154,20 +156,11 @@ export const CharacterCreator: React.FC<CharacterCreatorProps> = ({ onComplete, 
           {/* Row 1: Character Name & Gender */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="sm:col-span-2 space-y-1.5">
-              <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider flex items-center justify-between">
-                <span>Họ & Tên Nhân Vật</span>
-                <span className="text-[11px] text-neutral-500 normal-case">Bạn có thể sửa tên tùy ý</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Nhập tên nhân vật của bạn..."
-                className="w-full px-4 py-2.5 bg-neutral-950 border border-neutral-700 rounded-lg text-white placeholder-neutral-500 focus:outline-none focus:border-red-500 transition-colors text-sm"
-              />
+              <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">Danh tính</label>
+              <div className="rounded-lg border border-neutral-800 bg-neutral-950/70 px-4 py-2.5 text-xs leading-relaxed text-neutral-400">
+                Giữa tận thế, bạn chưa có tên. Chỉ khi một người sống sót khác hỏi, bạn mới quyết định có nói tên mình ra hay không.
+              </div>
             </div>
-
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-neutral-300 uppercase tracking-wider">
                 Giới Tính
