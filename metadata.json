@@ -1,0 +1,6 @@
+{
+  "name": "Hồi Kết Zombie: Kỷ Nguyên Sinh Tồn",
+  "description": "Game RPG sinh tồn hậu tận thế zombie tương tác với AI Gemini, cốt truyện phân nhánh sâu sắc, bạn đồng hành, biến cố thời gian thực và chế tạo vũ khí.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
