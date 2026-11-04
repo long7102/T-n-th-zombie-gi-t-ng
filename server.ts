@@ -10,6 +10,7 @@ import { STARTING_SCENARIOS } from './src/data/startingScenarios.ts';
 import { BackgroundEffectType } from './src/types/game.ts';
 import { applyWeatherToStats, makeForecast, openingScene, planTurn, renderOfflineTurn } from './src/data/storyDirector.ts';
 import { buildRadioTransmission, isFutureTrigger } from './src/data/radio.ts';
+import { fmtNamed } from './src/data/units.ts';
 import { buildCustomPrompt, buildTurnPrompt } from './src/data/turnPrompt.ts';
 import { getSetting, locationText, zoneLabel } from './src/data/settings.ts';
 import { buildChatPrompt, offlineChat, sanitizeChat, ChatReq } from './src/data/companionChat.ts';
@@ -294,7 +295,7 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
       woundChange: lockMech ? base.woundChange : parsed.woundChange || null,
       itemsGained: aiGained,
       itemsLost: lockMech ? base.itemsLost : Array.isArray(parsed.itemsLost) ? parsed.itemsLost : [],
-      loot_notification: aiGained.map((g: any) => `${g.name} x${g.quantity}`),
+      loot_notification: aiGained.map((g: any) => `${fmtNamed(g)}`),
       companionUpdates: Array.isArray(parsed.companionUpdates) && parsed.companionUpdates.length ? parsed.companionUpdates : base.companionUpdates,
       newSkill: base.newSkill || parsed.newSkill || undefined,
       discoveredBase: parsed.discoveredBase || undefined,

@@ -6,7 +6,7 @@ import { sound } from '../utils/audio';
 // quyết định nào cũng có hậu quả riêng và sẽ được nhớ lại về sau.
 export const EmergencyEventAlert: React.FC = () => {
   useEffect(() => {
-    sound.startHeartbeat(100);
+    sound.startHeartbeat(66);
     return () => sound.stopHeartbeat();
   }, []);
 

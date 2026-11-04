@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { fmtQty } from '../data/units';
 import { X, Home, ArrowRight, AlertTriangle, Check } from 'lucide-react';
 import { BaseCamp, Item } from '../types/game';
 import { MODULES, MODULE_BY_ID, SHELTER_SUITABILITY, costStatus, lvl } from '../utils/baseSystem';
@@ -232,8 +233,8 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
               {tab === 'store' && (
                 <div className="grid gap-4 lg:grid-cols-2">
                   {[
-                    { title: `Ba lô (${backpack.reduce((a, i) => a + i.quantity, 0)})`, items: backpack, action: (i: Item) => onStoreItem(i, 1), label: 'Cất vào kho' },
-                    { title: `Kho căn cứ (${base.warehouse.reduce((a, i) => a + i.quantity, 0)})`, items: base.warehouse, action: (i: Item) => onRetrieveItem(i, 1), label: 'Lấy ra' },
+                    { title: `Ba lô (${backpack.length})`, items: backpack, action: (i: Item) => onStoreItem(i, 1), label: 'Cất vào kho' },
+                    { title: `Kho căn cứ (${base.warehouse.length})`, items: base.warehouse, action: (i: Item) => onRetrieveItem(i, 1), label: 'Lấy ra' },
                   ].map((col) => (
                     <div key={col.title}>
                       <div className="mb-2 font-mono text-xs uppercase tracking-wider text-neutral-400">{col.title}</div>
@@ -243,7 +244,7 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
                           <button key={it.id} onClick={() => { sound.playClick(); col.action(it); }} title={`${it.name}: bấm để ${col.label.toLowerCase()}`} className="relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border border-neutral-700 bg-neutral-950/70 p-1 transition-colors hover:border-amber-500 hover:bg-neutral-800">
                             <span className="text-2xl">{itemIcon(it)}</span>
                             <span className="mt-0.5 line-clamp-2 text-center text-[9px] leading-tight text-neutral-300">{it.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}</span>
-                            <span className="absolute right-1 top-1 rounded bg-black/70 px-1 font-mono text-[10px] font-bold text-amber-400">x{it.quantity}</span>
+                            <span className="absolute right-1 top-1 rounded bg-black/70 px-1 font-mono text-[10px] font-bold text-amber-400">{fmtQty(it)}</span>
                           </button>
                         ))}
                       </div>

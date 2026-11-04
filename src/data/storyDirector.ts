@@ -7,6 +7,7 @@ import { LootTableId, rollLoot } from './lootTables';
 import { parseStrangerId, resolveStranger, rollStranger, strangerScene, strangerZones, StrangerSpec } from './strangers';
 import { buildRadioTransmission, RadioIntel } from './radio';
 import { composeEnding, EndingInput } from './storyArc';
+import { servingOf, fmtNamed } from './units';
 import { resolveRaid, raidTypeFor, raidDayOf, exposureOf, RaidType } from './raid';
 import { decodeMapAction, getNodeAny, REGION_LABEL } from './worldMap';
 import { VEHICLES, ROAD_EVENTS, SAFE_ROAD_LINES, fuelNeededRoundTrip, VehicleKind } from './vehicles';
@@ -323,7 +324,7 @@ function milestoneById(id: string) {
 }
 
 // Ăn thật: chọn món theo sở thích (ready = ăn liền, cook = món cần nấu), tính độ no, đồ sống/ôi gây hại.
-function applyEating(r: ChosenResolution, inv: any[], mode: 'ready' | 'cook' | 'any', mult: number, preferred?: any) {
+function applyEating(r: ChosenResolution, inv: any[], mode: 'ready' | 'cook' | 'any', mult: number, preferred?: any, people = 1) {
   const foods = inv.filter((i) => i.category === 'food' && (i.hungerReduce ?? 0) > 0 && (i.quantity ?? 1) > 0);
   const byFresh = (a: any, b: any) => (a.freshness ?? 999) - (b.freshness ?? 999);
   let pool = foods;
@@ -334,10 +335,12 @@ function applyEating(r: ChosenResolution, inv: any[], mode: 'ready' | 'cook' | '
   if (!food) return false;
   const rawEaten = food.needsCooking && !food.isCooked && mode !== 'cook';
   const spoiled = food.freshness !== undefined && food.freshness < 30;
-  let relief = Math.round(food.hungerReduce * mult * (spoiled ? 0.5 : 1) * (rawEaten ? 0.55 : 1));
+  // Gạo tính theo kg: mỗi người một bữa ~100 g, cả nhóm cùng ăn. Đồ đếm theo cái thì ăn 1 cái.
+  const sv = servingOf(food, people, mult);
+  const relief = Math.round((food.unit === 'kg' ? sv.hunger : food.hungerReduce * mult) * (spoiled ? 0.5 : 1) * (rawEaten ? 0.55 : 1));
   r.stats.hunger = (r.stats.hunger ?? 0) - relief;
-  r.lose.push({ name: food.name, quantity: 1 });
-  r.outcome += ` (Đã dùng: ${food.name}.)`;
+  r.lose.push({ name: food.name, quantity: sv.used });
+  r.outcome += ` (Đã dùng: ${sv.label}.)`;
   if (rawEaten) {
     r.stats.infection = (r.stats.infection ?? 0) + 8;
     r.stats.stamina = (r.stats.stamina ?? 0) - 4;
@@ -354,9 +357,10 @@ function applyDrinking(r: ChosenResolution, inv: any[], preferred?: any) {
   const waters = inv.filter((i) => (i.thirstReduce ?? 0) > 0 && (i.quantity ?? 1) > 0);
   const w = preferred || [...waters].sort((a, b) => Number(!!a.needsCooking) - Number(!!b.needsCooking))[0];
   if (!w) return false;
-  r.stats.thirst = (r.stats.thirst ?? 0) - Math.round(w.thirstReduce);
-  r.lose.push({ name: w.name, quantity: 1 });
-  r.outcome += ` (Đã uống: ${w.name}.)`;
+  const sv = servingOf(w);
+  r.stats.thirst = (r.stats.thirst ?? 0) - sv.thirst;
+  r.lose.push({ name: w.name, quantity: sv.used });
+  r.outcome += ` (Đã uống: ${sv.label}.)`;
   if (w.needsCooking && !w.isCooked) {
     r.stats.infection = (r.stats.infection ?? 0) + 7;
     r.outcome += ' Nước chưa đun sôi khiến bụng bạn đau quặn: nhớ đun sôi lần sau.';
@@ -679,7 +683,7 @@ function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId:
   if (ch.healWound) r.woundChange = { healed: true };
   if (ch.inflictWound) r.woundChange = { inflicted: true, location: ch.inflictWound };
 
-  if (r.gain.length) r.outcome += ` Bạn nhặt được: ${r.gain.map((g) => `${g.name} x${g.quantity}`).join(', ')}.`;
+  if (r.gain.length) r.outcome += ` Bạn nhặt được: ${r.gain.map((g) => `${fmtNamed(g)}`).join(', ')}.`;
   else if (rolls.length) r.outcome += ' Nhưng lần này bạn không tìm được gì đáng kể.';
 
   if (medic) {
@@ -698,7 +702,7 @@ function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId:
       });
     }
   }
-  if (ch.consumeFood && !applyEating(r, inv, ch.consumeFood, ch.foodMult ?? 1)) return failMissing('routine', 'thức ăn');
+  if (ch.consumeFood && !applyEating(r, inv, ch.consumeFood, ch.foodMult ?? 1, undefined, 1 + comps.filter((c: any) => c.status !== 'deceased').length)) return failMissing('routine', 'thức ăn');
   if (ch.drink && !applyDrinking(r, inv)) r.outcome += ' Nhưng bình nước đã trống trơn.';
   if (ch.go === 'outside' && setting.id === 'clinic_containment' && !flags.includes('clinic_breach')) {
     r.outcome += ' Nhưng cổng phụ của trạm bị chặn kín bởi rào cách ly và xác xe: bạn chưa thể ra ngoài được.';
@@ -791,7 +795,7 @@ function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setti
   } else if (isEat) {
     const preferred = matchInvItem(inv, a, (i) => i.category === 'food' && (i.hungerReduce ?? 0) > 0);
     const tmp = blankRes('custom', '');
-    const ok = applyEating(tmp, inv, isCook ? 'cook' : 'ready', isCook ? 1.3 : 1, preferred);
+    const ok = applyEating(tmp, inv, isCook ? 'cook' : 'ready', isCook ? 1.3 : 1, preferred, 1 + comps.filter((c: any) => c.status !== 'deceased').length);
     if (!ok) return failMissing('custom', 'thức ăn');
     parts.push(isCook ? 'Bạn nhóm bếp, nấu chín rồi ăn từ từ trong hơi ấm hiếm hoi.' : 'Bạn ăn nhanh, nhai kỹ để dạ dày không bị sốc.');
     parts.push(tmp.outcome.trim());
@@ -814,7 +818,7 @@ function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setti
     r.stats.stamina = (r.stats.stamina ?? 0) - 5;
     if (found.length) {
       r.gain = found;
-      parts.push(`Bạn lục tìm ${place ? place.label : 'khắp nơi'} thật cẩn thận và nhặt được: ${found.map((f) => `${f.name} x${f.quantity}`).join(', ')}.`);
+      parts.push(`Bạn lục tìm ${place ? place.label : 'khắp nơi'} thật cẩn thận và nhặt được: ${found.map((f) => `${fmtNamed(f)}`).join(', ')}.`);
     } else {
       parts.push(`Bạn lục tìm ${place ? place.label : 'khắp xung quanh'} một hồi lâu nhưng nơi này gần như đã bị vét sạch, bạn không thu được gì.`);
       r.stats.sanity = (r.stats.sanity ?? 0) - 2;
@@ -1162,7 +1166,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     hp: 0, infection: 0,
     hunger: isolated ? 8 : 6,
     thirst: (ctx.waterCut ? 12 : 8) + (isolated ? 2 : 0),
-    stamina: -9,
+    stamina: staminaDrift(next.zone, ctx, newDay),
     sanity: ctx.blackout ? -3 : -2,
   };
 
@@ -1178,6 +1182,17 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     location: locationText(setting, next.zone),
     awayTurns: next.zone === 'shelter' ? 0 : awayTurns + 1,
   };
+}
+
+// Thể lực trôi theo tình huống thay vì trừ cứng mỗi lượt: ở chỗ trú yên thì gần như không hao, ra ngoài mới tốn sức,
+// đói/khát nặng làm kiệt nhanh hơn, được ăn uống đủ và ở chỗ trú thì hồi dần, qua đêm thì ngủ lấy lại sức.
+export function staminaDrift(zone: Zone, ctx: { hasBase: boolean; hunger: number; thirst: number }, newDay: boolean): number {
+  const resting = zone === 'shelter';
+  let d = resting ? (ctx.hasBase ? 1 : 0) : zone === 'near' ? -3 : zone === 'roof' ? -2 : -5;
+  if (ctx.hunger >= 75 || ctx.thirst >= 75) d -= 3;
+  else if (resting && ctx.hunger <= 45 && ctx.thirst <= 45) d += 2;
+  if (newDay) d += resting ? 12 : 5;
+  return d;
 }
 
 export function mergeStats(base: SceneStats, extra: SceneStats, weather: WeatherType): SceneStats {
@@ -1245,7 +1260,7 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
     woundChange: r.woundChange || null,
     itemsGained: r.gain,
     itemsLost: r.lose,
-    loot_notification: r.gain.map((g) => `${g.name} x${g.quantity}`),
+    loot_notification: r.gain.map((g) => `${fmtNamed(g)}`),
     system_note: plan.systemNote,
     companionUpdates: companionUpdatesFor(req, plan, rng),
     newCompanion: r.newCompanion,

@@ -27,9 +27,10 @@ interface ParsedLootItem {
 }
 
 function parseItem(itemStr: string): ParsedLootItem {
-  const match = itemStr.match(/^(.*?)(?:\s*(?:x|X)\s*(\d+))?$/);
-  const name = match ? match[1].trim() : itemStr;
-  const count = match && match[2] ? `x${match[2]}` : (itemStr.includes('x') ? '' : 'x1');
+  const metric = itemStr.match(/^(.*?)\s+(\d+(?:[.,]\d+)?\s?(?:kg|g|L))$/);
+  const match = metric ? null : itemStr.match(/^(.*?)(?:\s*(?:x|X)\s*(\d+))?$/);
+  const name = metric ? metric[1].trim() : match ? match[1].trim() : itemStr;
+  const count = metric ? metric[2] : match && match[2] ? `x${match[2]}` : (itemStr.includes('x') ? '' : 'x1');
 
   const lower = name.toLowerCase();
 

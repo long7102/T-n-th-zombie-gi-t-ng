@@ -66,6 +66,7 @@ export interface Item {
   description: string;
   rarity: ItemRarity;
   iconName?: string;
+  unit?: 'kg' | 'l'; // kg: quantity là số kg (gạo); l: quantity là số lít (nước trữ trong can/xô). Không có: đếm theo cái/chai.
 
   // Thuộc tính bảo quản & ôi thiu thực phẩm
   freshness?: number;     // 100 = tươi mới, <30 = ôi thiu

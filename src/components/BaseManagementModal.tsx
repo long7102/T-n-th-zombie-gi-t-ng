@@ -1,4 +1,5 @@
 import React from 'react';
+import { fmtQty } from '../data/units';
 import { Home, Shield, Box, ArrowRightLeft, Flame, Snowflake, Zap, Bell, Plus, X, AlertTriangle } from 'lucide-react';
 import { BaseCamp, Item } from '../types/game';
 import { sound } from '../utils/audio';
@@ -178,7 +179,7 @@ export const BaseManagementModal: React.FC<BaseManagementModalProps> = ({
                       <div>
                         <div className="font-medium text-white flex items-center gap-1.5">
                           <span>{item.name}</span>
-                          <span className="text-amber-400 font-mono">x{item.quantity}</span>
+                          <span className="text-amber-400 font-mono">{fmtQty(item)}</span>
                         </div>
                         {item.freshness !== undefined && (
                           <div className="text-[10px] font-mono text-neutral-400">
@@ -222,7 +223,7 @@ export const BaseManagementModal: React.FC<BaseManagementModalProps> = ({
                         <div>
                           <div className="font-medium text-white flex items-center gap-1.5">
                             <span>{item.name}</span>
-                            <span className="text-emerald-400 font-mono">x{item.quantity}</span>
+                            <span className="text-emerald-400 font-mono">{fmtQty(item)}</span>
                           </div>
                           {item.freshness !== undefined && (
                             <div className="text-[10px] font-mono text-neutral-400">

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { fmtQty } from '../data/units';
 import { Package, Shield, Swords, X, Hammer, Flame, AlertCircle } from 'lucide-react';
 import { Item, ItemCategory, WoundState } from '../types/game';
 import { CATEGORY_LABEL, itemIcon, quickFacts } from '../utils/itemIcon';
@@ -60,7 +61,7 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-neutral-800 p-2 text-amber-500"><Package className="h-5 w-5" /></div>
             <div>
-              <h3 className="text-base font-bold tracking-wide text-white sm:text-lg">BA LÔ SINH TỒN · {inventory.reduce((a, i) => a + i.quantity, 0)} món</h3>
+              <h3 className="text-base font-bold tracking-wide text-white sm:text-lg">BA LÔ SINH TỒN · {inventory.length} món</h3>
               <p className="text-[11px] text-neutral-400 sm:text-xs">Bấm vào một ô để xem nhanh mô tả và thao tác. Đồ tươi sẽ hỏng dần, đồ sống phải nấu chín.</p>
             </div>
           </div>
@@ -140,7 +141,7 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
                   >
                     <span className="text-2xl leading-none sm:text-3xl">{itemIcon(item)}</span>
                     <span className="mt-1 line-clamp-2 w-full text-center text-[9px] leading-tight text-neutral-300 sm:text-[10px]">{item.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}</span>
-                    <span className="absolute right-1 top-1 rounded bg-black/70 px-1 font-mono text-[10px] font-bold text-amber-400">x{item.quantity}</span>
+                    <span className="absolute right-1 top-1 rounded bg-black/70 px-1 font-mono text-[10px] font-bold text-amber-400">{fmtQty(item)}</span>
                     {isEquipped(item) && <span className="absolute left-1 top-1 rounded bg-red-700 px-1 text-[8px] font-bold text-white">ĐANG DÙNG</span>}
                     {fresh && (
                       <span className="absolute bottom-0.5 left-1 right-1 h-1 overflow-hidden rounded bg-neutral-800">
@@ -169,7 +170,7 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
                   <div className="min-w-0">
                     <h4 className="text-sm font-bold leading-tight text-white">{selected.name}</h4>
                     <div className={`mt-0.5 font-mono text-[10px] uppercase ${RARITY_TEXT[selected.rarity] || RARITY_TEXT.common}`}>
-                      {RARITY_NAME[selected.rarity] || 'Thường'} · {CATEGORY_LABEL[selected.category] || selected.category} · x{selected.quantity}
+                      {RARITY_NAME[selected.rarity] || 'Thường'} · {CATEGORY_LABEL[selected.category] || selected.category} · {fmtQty(selected)}
                     </div>
                   </div>
                 </div>

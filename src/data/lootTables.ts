@@ -131,7 +131,7 @@ export const LOOT: Record<LootTableId, Entry[]> = {
     { w: 3, item: wpn('Dao rừng', 32, 90, { rarity: 'uncommon' }) },
   ],
   household: [
-    { w: 10, item: raw('Gạo tẻ (túi 1kg)', 55, { description: 'Cần nấu cơm; no lâu nhưng phải có lửa và nước sạch.' }), q: [1, 2] },
+    { w: 10, item: raw('Gạo tẻ', 350, { unit: 'kg', description: 'Tính theo kg. Mỗi bữa một người ăn khoảng 100 g; cần lửa và nước sạch để nấu.' }), q: [1, 2] },
     { w: 9, item: raw('Mì tôm gói', 28, { description: 'Có thể bóp sống ăn tạm (hại bụng) hoặc nấu chín.' }), q: [2, 4] },
     { w: 6, item: raw('Trứng gà', 22), q: [2, 5], fresh: [55, 85] },
     { w: 6, item: food('Đường cát (túi nhỏ)', 14, { description: 'Năng lượng nhanh, dùng pha nước hoặc ăn trực tiếp.' }) },
@@ -171,7 +171,7 @@ export const LOOT: Record<LootTableId, Entry[]> = {
     { w: 4, item: fresh('Dưa leo', 8, { thirstReduce: 14 }), q: [2, 3], fresh: [40, 70] },
     { w: 5, item: food('Cá khô (bó)', 30, { description: 'Mặn, bảo quản rất lâu, cần uống nhiều nước.', thirstReduce: -8 }), q: [1, 2] },
     { w: 4, item: food('Mực khô', 26, { description: 'Dai, giàu đạm, để rất lâu.' }) },
-    { w: 4, item: raw('Gạo nếp', 55) },
+    { w: 4, item: raw('Gạo nếp', 350, { unit: 'kg', description: 'Tính theo kg, nấu xôi hoặc cơm dẻo.' }), q: [1, 2] },
     { w: 4, item: food('Tôm khô', 20) },
     { w: 3, item: food('Nước dừa tươi', 8, { thirstReduce: 35, canSpoil: true, freshness: 70 }) },
   ],
@@ -211,8 +211,8 @@ export const LOOT: Record<LootTableId, Entry[]> = {
     { w: 4, item: fresh('Hành lá', 3), fresh: [60, 90] },
   ],
   water_raw: [
-    { w: 8, item: drink('Nước mưa hứng (chưa đun)', 30, { needsCooking: true, description: 'Cần đun sôi trước khi uống.' }), q: [1, 2] },
-    { w: 5, item: drink('Nước bể trên mái (chưa đun)', 35, { needsCooking: true, description: 'Hơi đục, phải đun sôi.' }) },
+    { w: 8, item: drink('Nước mưa hứng (chưa đun)', 55, { unit: 'l', needsCooking: true, description: 'Tính theo lít. Cần đun sôi trước khi uống.' }), q: [2, 5] },
+    { w: 5, item: drink('Nước bể trên mái (chưa đun)', 55, { unit: 'l', needsCooking: true, description: 'Tính theo lít. Hơi đục, phải đun sôi.' }), q: [3, 8] },
     { w: 3, item: drink('Nước lọc đóng chai', 45) },
   ],
   pharmacy: [
@@ -236,9 +236,9 @@ export const LOOT: Record<LootTableId, Entry[]> = {
   ],
   warehouse: [
     { w: 8, item: food('Đồ hộp thịt hầm', 35, { isSealed: true }), q: [1, 3] },
-    { w: 6, item: raw('Gạo tẻ (bao 5kg)', 90, { description: 'Bao gạo nặng: cả tuần ăn nếu có lửa.' }) },
+    { w: 6, item: raw('Gạo tẻ', 350, { unit: 'kg', description: 'Nguyên một bao gạo nặng 5 kg: một người ăn được hơn một tháng nếu có lửa.' }), q: [5, 5] },
     { w: 6, item: raw('Mì tôm (thùng)', 28), q: [3, 6] },
-    { w: 6, item: drink('Nước khoáng (thùng 6 chai)', 45), q: [2, 4] },
+    { w: 6, item: drink('Nước khoáng đóng chai', 45), q: [4, 6] },
     { w: 5, item: food('Bột ngũ cốc ăn liền', 34, { isSealed: true }) },
     { w: 4, item: food('Dầu ăn (can 2 lít)', 10) },
     { w: 4, item: food('Muối hạt (bao)', 2) },
