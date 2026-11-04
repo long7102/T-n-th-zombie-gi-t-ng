@@ -95,6 +95,22 @@ export const SETTINGS: Record<string, Setting> = {
   },
 };
 
+SETTINGS.private_house = {
+  id: 'private_house',
+  place: 'Nhà riêng - Ngõ 12',
+  labels: { shelter: 'trong nhà bạn', near: 'sân gạch và hàng rào', outside: 'con ngõ và các nhà quanh đó', roof: 'mái tum' },
+  neighbor: 'nhà hàng xóm sát vách',
+  hasRoof: true,
+  steps: {
+    'shelter>near': 'Bạn rút then cửa chính thật khẽ, bước ra sân gạch phủ rêu và nép sát bờ tường.',
+    'near>shelter': 'Bạn quay vào nhà, cài then cửa và kéo bàn ghế chèn sau lưng.',
+    'near>outside': 'Bạn mở cổng sắt rỉ chỉ vừa một người, rón rén ra con ngõ hẹp tối om.',
+    'outside>near': 'Bạn lách vào cổng, kéo chốt và dựa lưng thở dốc.',
+    'near>roof': 'Bạn leo thang sắt dựng sau nhà lên mái tum, nơi nhìn được cả dãy mái các nhà trong ngõ.',
+    'roof>near': 'Bạn leo xuống thang sắt, trở lại sân.',
+  },
+};
+
 export const DEFAULT_SETTING_ID = 'apartment_survivors';
 
 export function getSetting(id?: string): Setting {

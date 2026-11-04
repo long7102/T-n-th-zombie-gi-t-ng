@@ -10,7 +10,7 @@ import { Item } from '../types/game';
 export type LootTableId =
   | 'household' | 'fridge' | 'market' | 'vehicle' | 'forage' | 'pond' | 'garden'
   | 'water_raw' | 'pharmacy' | 'hardware' | 'warehouse' | 'office'
-  | 'weapons' | 'clothing' | 'tools' | 'domestic' | 'electronics' | 'camping';
+  | 'autoparts' | 'weapons' | 'clothing' | 'tools' | 'domestic' | 'electronics' | 'camping';
 
 interface Entry {
   w: number;                 // trọng số xuất hiện
@@ -46,7 +46,22 @@ const tool = (name: string, o: Partial<Item> = {}): Partial<Item> => ({
   id: 'lt_tool', name, category: 'tool', quantity: 1, rarity: 'common', description: 'Dụng cụ hữu ích.', ...o,
 });
 
+const part = (name: string, o: Partial<Item> = {}): Partial<Item> => ({
+  id: 'lt_part', name, category: 'material', quantity: 1, rarity: 'common', description: 'Phụ tùng xe cộ, dùng để lắp hoặc sửa xe.', ...o,
+});
+
 export const LOOT: Record<LootTableId, Entry[]> = {
+  autoparts: [
+    { w: 7, item: part('Bánh xe dự phòng') },
+    { w: 6, item: part('Lốp xe cũ còn dùng được') },
+    { w: 5, item: part('Bình ắc quy', { rarity: 'uncommon', description: 'Còn điện, khởi động được động cơ.' }) },
+    { w: 6, item: part('Bugi và dây curoa') },
+    { w: 4, item: part('Kim phun cũ') },
+    { w: 5, item: part('Dầu nhớt (lon)') },
+    { w: 4, item: tool('Bộ cờ lê và kìm', { description: 'Cần để lắp và sửa xe.' }) },
+    { w: 5, item: part('Dây xích xe đạp') },
+    { w: 5, item: part('Can xăng mini 5 lít', { rarity: 'uncommon', description: 'Nhiên liệu cho xe và máy phát (8 đơn vị).' }) },
+  ],
   weapons: [
     { w: 8, item: wpn('Gậy bóng chày nhôm', 30, 85, { description: 'Nhẹ, nhanh, đập khớp gối rất tốt.' }) },
     { w: 7, item: wpn('Dao phay nhà bếp', 28, 70, { description: 'Lưỡi dày, chặt xương gọn.' }) },

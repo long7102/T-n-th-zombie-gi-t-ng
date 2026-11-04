@@ -204,6 +204,7 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
       day: plan.nextDay,
       current_location: plan.location,
       lasting_consequences: body.flags || [],
+      world_summary: typeof body.worldSummary === 'string' ? body.worldSummary.slice(0, 2600) : undefined,
       base_location: baseLocationType,
       character: {
         name: 'Người sống sót (chưa ai biết tên)',

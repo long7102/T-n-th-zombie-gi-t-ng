@@ -804,6 +804,36 @@ class SoundEngine {
     if (this.musicGain && this.ctx) this.musicGain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.4);
   }
 
+  // Tiếng động cơ nổ máy rồi chạy xa (xe máy / ô tô)
+  public playEngine() {
+    try {
+      this.init();
+      if (!this.ctx || !this.masterGain || this.muted) return;
+      const now = this.ctx.currentTime;
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      const f = this.ctx.createBiquadFilter();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(38, now);
+      o.frequency.linearRampToValueAtTime(70, now + 0.6);
+      o.frequency.linearRampToValueAtTime(52, now + 1.6);
+      o.frequency.exponentialRampToValueAtTime(30, now + 2.4);
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(380, now);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(0.22, now + 0.15);
+      g.gain.setValueAtTime(0.18, now + 1.6);
+      g.gain.exponentialRampToValueAtTime(0.0005, now + 2.4);
+      o.connect(f);
+      f.connect(g);
+      g.connect(this.masterGain);
+      o.start(now);
+      o.stop(now + 2.5);
+    } catch {
+      // ignore
+    }
+  }
+
   // Tactical click
   public playClick() {
     try {

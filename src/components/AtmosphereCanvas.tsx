@@ -462,5 +462,5 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
     };
   }, [weather, backgroundEffect, dangerLevel, isEmergency, day, cityWaterCutoff, cityPowerBlackout]);
 
-  return <canvas ref={canvasRef} className="pointer-events-none fixed inset-0 z-0 h-full w-full" />;
+  return <canvas ref={canvasRef} style={{ filter: 'sepia(0.28) saturate(0.78) contrast(1.06) brightness(0.92)' }} className="pointer-events-none fixed inset-0 z-0 h-full w-full" />;
 };

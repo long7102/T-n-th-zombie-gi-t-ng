@@ -264,5 +264,6 @@ export const SHELTER_SUITABILITY: Record<string, { score: number; pros: string[]
   supermarket_lockdown: { score: 64, kind: 'Civilian Shelter', pros: ['Kho hàng lớn, nhiều đồ dự trữ', 'Cửa cuốn sắt chắc chắn'], cons: ['Kính vỡ nhiều, khó giữ nhiệt', 'Mùi thức ăn thu hút zombie'] },
   highway_traffic_breakdown: { score: 22, kind: 'Nomad', pros: ['Dễ di chuyển'], cons: ['Trống trải, không có tường', 'Không có nước, không có chỗ trồng trọt'] },
   metro_train_derailment: { score: 40, kind: 'Civilian Shelter', pros: ['Dưới lòng đất, thời tiết không ảnh hưởng'], cons: ['Tối, ẩm', 'Không có đường hứng nước mưa'] },
+  private_house: { score: 66, kind: 'Civilian Shelter', pros: ['Là nhà của bạn, biết rõ từng ngóc ngách', 'Có sân nhỏ để trồng rau và hứng nước', 'Trèo qua các nhà hàng xóm để loot dần'], cons: ['Tường rào mỏng, cửa sắt cũ', 'Nhiều nhà liền kề, tiếng động lan nhanh'] },
   clinic_containment: { score: 58, kind: 'Civilian Shelter', pros: ['Có sẵn thuốc và giường', 'Mái tôn hứng nước tốt'], cons: ['Nhiều xác nhiễm bệnh cần dọn'] },
 };

@@ -3,7 +3,10 @@ import { X, Home, ArrowRight, AlertTriangle, Check } from 'lucide-react';
 import { BaseCamp, Item } from '../types/game';
 import { MODULES, MODULE_BY_ID, SHELTER_SUITABILITY, costStatus, lvl } from '../utils/baseSystem';
 import { itemIcon } from '../utils/itemIcon';
+import { BaseCutaway } from './BaseCutaway';
+import { Companion } from '../types/game';
 import { sound } from '../utils/audio';
+import { Vehicle, VehicleKind, VEHICLES, REPAIR_COST, FUEL_RE, FUEL_PER_CAN } from '../data/vehicles';
 
 interface Props {
   base: BaseCamp;
@@ -14,6 +17,11 @@ interface Props {
   loopStatus: Record<string, 'ok' | 'starved' | 'off'>;
   onEstablish: () => void;
   onBuild: (moduleId: string) => void;
+  companions: Companion[];
+  vehicle: Vehicle | null;
+  onBuildVehicle: (kind: VehicleKind) => void;
+  onRepairVehicle: () => void;
+  onRefuelVehicle: () => void;
   onStoreItem: (item: Item, quantity?: number) => void;
   onRetrieveItem: (item: Item, quantity?: number) => void;
   onClose: () => void;
@@ -30,8 +38,8 @@ const LOOP: { id: string; label: string; icon: string }[] = [
   { id: 'generator', label: 'Điện', icon: '⚡' },
 ];
 
-export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLabel, placeName, loopStatus, onEstablish, onBuild, onStoreItem, onRetrieveItem, onClose }) => {
-  const [tab, setTab] = useState<'overview' | 'build' | 'store'>('overview');
+export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLabel, placeName, loopStatus, onEstablish, onBuild, companions, vehicle, onBuildVehicle, onRepairVehicle, onRefuelVehicle, onStoreItem, onRetrieveItem, onClose }) => {
+  const [tab, setTab] = useState<'overview' | 'build' | 'garage' | 'store'>('overview');
   const suit = SHELTER_SUITABILITY[settingId] || SHELTER_SUITABILITY.apartment_survivors;
 
   const loopColor = (id: string) => {
@@ -82,7 +90,7 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
         ) : (
           <>
             <div className="flex gap-1.5 border-b border-neutral-800 bg-neutral-950/30 p-3">
-              {([['overview', 'Vòng khép kín'], ['build', 'Công trình'], ['store', 'Kho căn cứ']] as const).map(([k, label]) => (
+              {([['overview', 'Vòng khép kín'], ['build', 'Công trình'], ['garage', 'Garage & xe'], ['store', 'Kho căn cứ']] as const).map(([k, label]) => (
                 <button key={k} onClick={() => { sound.playClick(); setTab(k); }} className={`cursor-pointer rounded px-3 py-1.5 text-xs font-medium transition-colors ${tab === k ? 'bg-neutral-200 text-neutral-900' : 'bg-neutral-800/80 text-neutral-400 hover:text-white'}`}>{label}</button>
               ))}
             </div>
@@ -90,6 +98,7 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
             <div className="flex-1 overflow-y-auto p-4 sm:p-5">
               {tab === 'overview' && (
                 <div className="space-y-4">
+                  <BaseCutaway base={base} companions={companions} loopStatus={loopStatus} vehicle={vehicle} />
                   <p className="text-xs leading-relaxed text-neutral-400">Mỗi mắt xích cần đầu vào từ mắt xích trước. Thiếu nước thì vườn héo, thiếu rau thì gà không đẻ, thiếu nhiên liệu thì bếp và máy phát ngừng. Biogas biến rác vườn và chuồng gà thành nhiên liệu để vòng quay không dừng.</p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {LOOP.map((l, i) => (
@@ -148,6 +157,56 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {tab === 'garage' && (
+                <div className="space-y-4">
+                  <p className="text-xs leading-relaxed text-neutral-400">Lắp xe từ phụ tùng nhặt được (lốp, ắc quy, bugi, dầu nhớt, cờ lê). Xe giúp đi xa, đi nhanh, chở đồng đội và tới được những cứ điểm quá xa để đi bộ, nhưng tốn xăng, gây ồn và có thể hỏng giữa đường.</p>
+                  {vehicle && (() => {
+                    const d = VEHICLES[vehicle.kind];
+                    const repair = costStatus(REPAIR_COST, backpack, base.warehouse);
+                    const cans = [...backpack, ...base.warehouse].filter((i) => FUEL_RE.test(i.name) && i.category === 'material').reduce((s, i) => s + i.quantity, 0);
+                    return (
+                      <div className="rounded-xl border border-sky-800/60 bg-sky-950/20 p-4">
+                        <div className="mb-2 flex items-center gap-2 text-sm font-bold text-white"><span className="text-2xl">{d.icon}</span>{d.name}</div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div><div className="mb-1 flex justify-between font-mono text-[11px] text-neutral-400"><span>Độ bền</span><span>{Math.round(vehicle.condition)}%</span></div><div className="h-2 overflow-hidden rounded bg-neutral-900"><div className={`h-full ${vehicle.condition < 30 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${vehicle.condition}%` }} /></div></div>
+                          <div><div className="mb-1 flex justify-between font-mono text-[11px] text-neutral-400"><span>Nhiên liệu</span><span>{Math.round(vehicle.fuel)}/{d.maxFuel}</span></div><div className="h-2 overflow-hidden rounded bg-neutral-900"><div className="h-full bg-amber-500" style={{ width: `${d.maxFuel ? (vehicle.fuel / d.maxFuel) * 100 : 100}%` }} /></div></div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button disabled={vehicle.condition >= 100 || !repair.every((c) => c.ok)} onClick={() => { sound.playLoot(); onRepairVehicle(); }} className="cursor-pointer rounded border border-emerald-700 bg-emerald-900/60 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-800 disabled:cursor-not-allowed disabled:border-neutral-800 disabled:bg-neutral-900 disabled:text-neutral-500">
+                            Sửa xe (+35%) · {repair.map((c) => `${c.label}: ${Math.min(c.have, c.need)}/${c.need}`).join(', ')}
+                          </button>
+                          {d.maxFuel > 0 && (
+                            <button disabled={cans === 0 || vehicle.fuel >= d.maxFuel} onClick={() => { sound.playLoot(); onRefuelVehicle(); }} className="cursor-pointer rounded border border-amber-700 bg-amber-900/50 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-800 disabled:cursor-not-allowed disabled:border-neutral-800 disabled:bg-neutral-900 disabled:text-neutral-500">
+                              Đổ xăng (+{FUEL_PER_CAN}) · còn {cans} can
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(Object.keys(VEHICLES) as VehicleKind[]).map((k) => {
+                      const d = VEHICLES[k];
+                      const st = costStatus(d.cost, backpack, base.warehouse);
+                      const ok = st.every((c) => c.ok);
+                      return (
+                        <div key={k} className="flex flex-col rounded-xl border border-neutral-800 bg-neutral-950/60 p-3.5">
+                          <div className="mb-1 flex items-center gap-2"><span className="text-xl">{d.icon}</span><span className="text-sm font-bold text-white">{d.name}</span></div>
+                          <p className="mb-1.5 text-[11px] leading-relaxed text-neutral-400">{d.desc}</p>
+                          <div className="mb-2 font-mono text-[10px] text-neutral-500">Tốc độ x{(1 / d.speed).toFixed(1)} · xăng/chặng {d.fuelPerHop} · chở {d.crew} người · ồn {d.noise}/4</div>
+                          <div className="mb-2 space-y-0.5 text-[11px]">
+                            {st.map((c) => (<div key={c.label} className={c.ok ? 'text-emerald-300' : 'text-red-300'}>{c.ok ? <Check className="mr-1 inline h-3 w-3" /> : <AlertTriangle className="mr-1 inline h-3 w-3" />}{c.label}: {Math.min(c.have, c.need)}/{c.need}</div>))}
+                          </div>
+                          <button disabled={!ok} onClick={() => { sound.playLoot(); onBuildVehicle(k); }} className="mt-auto w-full cursor-pointer rounded border border-emerald-700 bg-emerald-900/60 px-3 py-1.5 text-xs font-semibold text-emerald-100 hover:bg-emerald-800 disabled:cursor-not-allowed disabled:border-neutral-800 disabled:bg-neutral-900 disabled:text-neutral-500">
+                            {vehicle ? (vehicle.kind === k ? 'Lắp thêm bộ mới (thay xe cũ)' : 'Đổi sang xe này (bỏ xe cũ)') : 'Lắp ráp'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

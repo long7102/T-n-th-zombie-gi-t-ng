@@ -23,6 +23,7 @@ export interface WorldNode {
   connections: string[];
   loot: { common: Partial<Item>[]; rare?: Partial<Item>[] };
   table?: LootTableId;          // bảng loot ngẫu nhiên (ưu tiên hơn loot cố định)
+  needsVehicle?: boolean;       // quá xa để đi bộ, chỉ tới được bằng xe
   outpost?: OutpostInfo;        // nếu là cứ điểm có thể dùng làm căn cứ
 }
 
@@ -131,6 +132,7 @@ export const NODE_BY_ID: Record<string, WorldNode> = Object.fromEntries(WORLD_NO
 interface OutpostTemplate {
   id: string; name: string; kind: NodeKind; region: MapRegion; danger: number; table: LootTableId; description: string; resources: string[];
   info: OutpostInfo;
+  needsVehicle?: boolean;
 }
 
 export const OUTPOST_TEMPLATES: OutpostTemplate[] = [
@@ -138,17 +140,17 @@ export const OUTPOST_TEMPLATES: OutpostTemplate[] = [
     info: { baseScore: 78, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Hầm Bệnh Viện', bonus: { medbay: 1, walls: 1 }, pros: ['Tường bê tông dày, khó phá', 'Có sẵn góc y tế', 'Kín gió, ít thời tiết xấu'], cons: ['Tối và ẩm', 'Không có chỗ trồng trọt'] } },
   { id: 'workshop', name: 'Xưởng Cơ Khí Bỏ Hoang', kind: 'industrial', region: 'far', danger: 4, table: 'tools', description: 'Xưởng rộng với cửa cuốn sắt, máy móc và kho phụ tùng. Thợ giỏi biến nơi này thành pháo đài.', resources: ['Dụng cụ', 'Phụ tùng', 'Nhiên liệu'],
     info: { baseScore: 70, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Xưởng Cơ Khí', bonus: { walls: 2 }, pros: ['Cửa cuốn sắt chắc chắn', 'Nhiều dụng cụ chế tạo', 'Chỗ rộng để xây nhiều công trình'], cons: ['Nhiều tiếng vang, dễ thu hút bầy'] } },
-  { id: 'farmhouse', name: 'Nhà Vườn Có Giếng Ngoại Ô', kind: 'farm', region: 'far', danger: 3, table: 'garden', description: 'Mảnh vườn rộng, giếng nước sạch và chuồng gia súc bỏ trống. Gần như được sinh ra để làm nơi tự cung tự cấp.', resources: ['Rau quả', 'Giếng nước', 'Đất trồng'],
+  { needsVehicle: true, id: 'farmhouse', name: 'Nhà Vườn Có Giếng Ngoại Ô', kind: 'farm', region: 'far', danger: 3, table: 'garden', description: 'Mảnh vườn rộng, giếng nước sạch và chuồng gia súc bỏ trống. Gần như được sinh ra để làm nơi tự cung tự cấp.', resources: ['Rau quả', 'Giếng nước', 'Đất trồng'],
     info: { baseScore: 84, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Nhà Vườn', bonus: { well: 1, garden: 1 }, pros: ['Có giếng nước sạch', 'Vườn trồng sẵn', 'Xa thành phố, ít bầy lớn'], cons: ['Tường rào mỏng, cần gia cố', 'Xa các điểm loot lớn'] } },
-  { id: 'fuel_station', name: 'Trạm Xăng Đóng Cửa', kind: 'fuel_station', region: 'mid', danger: 3, table: 'vehicle', description: 'Trạm nhỏ còn vài bể xăng dưới đất. Quá trống trải để ở lâu, nhưng nhiên liệu thì quý.', resources: ['Xăng dầu', 'Đồ ăn nhanh', 'Dụng cụ'],
+  { id: 'fuel_station', name: 'Trạm Xăng Đóng Cửa', kind: 'fuel_station', region: 'mid', danger: 3, table: 'autoparts', description: 'Trạm nhỏ còn vài bể xăng dưới đất. Quá trống trải để ở lâu, nhưng nhiên liệu thì quý.', resources: ['Xăng dầu', 'Đồ ăn nhanh', 'Dụng cụ'],
     info: { baseScore: 38, baseKind: 'Nomad', baseName: 'Điểm dừng Trạm Xăng', bonus: {}, pros: ['Nhiên liệu dồi dào'], cons: ['Trống trải, dễ bị phát hiện', 'Nguy cơ cháy nổ'] } },
   { id: 'old_church', name: 'Nhà Thờ Đá Kiên Cố', kind: 'church', region: 'mid', danger: 3, table: 'domestic', description: 'Tường đá dày, cổng gỗ lim và tháp chuông cao: nơi trú ẩn của người xưa, đáng tin hơn cả nhà hiện đại.', resources: ['Đồ gia dụng', 'Nến', 'Chăn'],
     info: { baseScore: 76, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Nhà Thờ Đá', bonus: { walls: 2, watchtower: 1 }, pros: ['Tường đá, cổng gỗ lim rất chắc', 'Tháp chuông làm tháp canh', 'Yên tĩnh, tinh thần dễ chịu'], cons: ['Lạnh về đêm', 'Không có nguồn nước gần'] } },
-  { id: 'cold_storage', name: 'Kho Lạnh Công Nghiệp', kind: 'coldstorage', region: 'far', danger: 4, table: 'warehouse', description: 'Kho lạnh lớn với tường cách nhiệt dày. Hàng trong kho đã ôi nhưng đồ khô vẫn còn.', resources: ['Đồ dự trữ', 'Gạo', 'Nước đóng chai'],
+  { needsVehicle: true, id: 'cold_storage', name: 'Kho Lạnh Công Nghiệp', kind: 'coldstorage', region: 'far', danger: 4, table: 'warehouse', description: 'Kho lạnh lớn với tường cách nhiệt dày. Hàng trong kho đã ôi nhưng đồ khô vẫn còn.', resources: ['Đồ dự trữ', 'Gạo', 'Nước đóng chai'],
     info: { baseScore: 66, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Kho Lạnh', bonus: { walls: 1 }, pros: ['Tường cách nhiệt, rất chắc', 'Kho chứa khổng lồ'], cons: ['Mùi thối thu hút zombie', 'Cần điện để vận hành tủ lạnh'] } },
   { id: 'school', name: 'Trường Học Có Sân & Bể Nước', kind: 'school', region: 'mid', danger: 3, table: 'office', description: 'Sân rộng, bể nước lớn trên mái và nhiều phòng học trống. Dễ chứa cả một nhóm lớn.', resources: ['Văn phòng phẩm', 'Nước', 'Đồ cá nhân'],
     info: { baseScore: 68, baseKind: 'Civilian Shelter', baseName: 'Căn cứ Trường Học', bonus: { rain_collector: 1 }, pros: ['Bể nước lớn trên mái', 'Nhiều phòng, chứa được đông người', 'Sân trồng rau'], cons: ['Cửa kính nhiều, khó giữ', 'Hành lang dài dễ bị tập kích'] } },
-  { id: 'hill_station', name: 'Trạm Phát Sóng Trên Đồi', kind: 'tower', region: 'far', danger: 4, table: 'electronics', description: 'Tháp phát sóng cũ trên đồi cao, thấy rõ mọi hướng và còn nguồn điện dự phòng.', resources: ['Pin', 'Radio', 'Dây điện'],
+  { needsVehicle: true, id: 'hill_station', name: 'Trạm Phát Sóng Trên Đồi', kind: 'tower', region: 'far', danger: 4, table: 'electronics', description: 'Tháp phát sóng cũ trên đồi cao, thấy rõ mọi hướng và còn nguồn điện dự phòng.', resources: ['Pin', 'Radio', 'Dây điện'],
     info: { baseScore: 60, baseKind: 'Military Base', baseName: 'Căn cứ Trạm Phát Sóng', bonus: { watchtower: 2 }, pros: ['Tầm nhìn bao quát mọi hướng', 'Gần như không ai tới', 'Bắt radio rất tốt'], cons: ['Khó tìm nước', 'Gió lớn, lạnh'] } },
 ];
 
@@ -158,7 +160,7 @@ const RING_X: Record<string, number> = { mid: 29, far: 43 };
 function outpostToNode(tpl: OutpostTemplate, x: number, y: number, connections: string[]): WorldNode {
   return {
     id: 'op_' + tpl.id, name: tpl.name, kind: tpl.kind, region: tpl.region, x, y, danger: tpl.danger,
-    description: tpl.description, resources: tpl.resources, connections, loot: { common: [] }, table: tpl.table, outpost: tpl.info,
+    description: tpl.description, resources: tpl.resources, connections, loot: { common: [] }, table: tpl.table, outpost: tpl.info, needsVehicle: tpl.needsVehicle,
   };
 }
 
@@ -260,12 +262,15 @@ export const KIND_ICON: Record<NodeKind, string> = {
 
 // Mã hóa/giải mã hành động di chuyển để server xử lý tất định.
 export const MAP_ACTION_PREFIX = '[MAP_TRAVEL]';
-export function encodeMapAction(nodeId: string, style: 'quick' | 'thorough', hops: number, visits: number, text: string): string {
-  return `${MAP_ACTION_PREFIX} node=${nodeId} style=${style} hops=${hops} visits=${visits} :: ${text}`;
+export interface TravelExtra { vehicle?: string; vcond?: number; vfuel?: number; crew?: number }
+
+export function encodeMapAction(nodeId: string, style: 'quick' | 'thorough', hops: number, visits: number, text: string, extra: TravelExtra = {}): string {
+  const ex = extra.vehicle ? ` vehicle=${extra.vehicle} vcond=${Math.round(extra.vcond ?? 100)} vfuel=${extra.vfuel ?? 0} crew=${extra.crew ?? 0}` : extra.crew ? ` vehicle=none vcond=0 vfuel=0 crew=${extra.crew}` : '';
+  return `${MAP_ACTION_PREFIX} node=${nodeId} style=${style} hops=${hops} visits=${visits}${ex} :: ${text}`;
 }
-export function decodeMapAction(action: string): { nodeId: string; style: 'quick' | 'thorough'; hops: number; visits: number; text: string } | null {
+export function decodeMapAction(action: string): { nodeId: string; style: 'quick' | 'thorough'; hops: number; visits: number; text: string; vehicle?: string; vcond: number; vfuel: number; crew: number } | null {
   if (!action.startsWith(MAP_ACTION_PREFIX)) return null;
-  const m = action.match(/node=(\S+)\s+style=(quick|thorough)\s+hops=(\d+)\s+visits=(\d+)\s+::\s*(.*)$/s);
+  const m = action.match(/node=(\S+)\s+style=(quick|thorough)\s+hops=(\d+)\s+visits=(\d+)(?:\s+vehicle=(\w+)\s+vcond=(\d+)\s+vfuel=([\d.]+)\s+crew=(\d+))?\s+::\s*(.*)$/s);
   if (!m) return null;
-  return { nodeId: m[1], style: m[2] as any, hops: +m[3], visits: +m[4], text: m[5] };
+  return { nodeId: m[1], style: m[2] as any, hops: +m[3], visits: +m[4], vehicle: m[5] && m[5] !== 'none' ? m[5] : undefined, vcond: +(m[6] || 0), vfuel: +(m[7] || 0), crew: +(m[8] || 0), text: m[9] };
 }

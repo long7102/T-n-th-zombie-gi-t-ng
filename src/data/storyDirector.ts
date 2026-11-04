@@ -6,7 +6,9 @@ import { fill, getSetting, locationText, moveText, Setting, Zone } from './setti
 import { LootTableId, rollLoot } from './lootTables';
 import { parseStrangerId, resolveStranger, rollStranger, strangerScene, strangerZones, StrangerSpec } from './strangers';
 import { buildRadioTransmission, RadioIntel } from './radio';
+import { composeEnding } from './storyArc';
 import { decodeMapAction, getNodeAny, REGION_LABEL } from './worldMap';
+import { VEHICLES, ROAD_EVENTS, SAFE_ROAD_LINES, fuelNeededRoundTrip, VehicleKind } from './vehicles';
 
 // ====================================================================
 // STORY DIRECTOR - "đạo diễn" cốt truyện chạy ở server.
@@ -34,6 +36,7 @@ export interface ChosenResolution {
   zone?: Zone;
   flags?: string[];
   flagsRemove?: string[];
+  vehicleDelta?: { condition: number; fuel: number };
   deterministic: boolean;
 }
 
@@ -362,14 +365,14 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
   if (sceneId.startsWith('r_start')) {
     const n = parseInt(sceneId.split(':')[1] || '', 10);
     const ch = Number.isNaN(n) ? undefined : OPENING_SETS[n % OPENING_SETS.length].find((c) => fill(c.text, setting) === action);
-    if (ch) return fromRoutineChoice(ch, inv, comps, '', rng, setting, zone);
+    if (ch) return fromRoutineChoice(ch, inv, comps, '', rng, setting, zone, req.flags || []);
   }
 
   // Cảnh thường
   const routine = ROUTINE_SCENES.find((s) => s.id === sceneId);
   if (routine) {
     const ch = routine.choices.find((c) => fill(c.text, setting) === action);
-    if (ch) return fromRoutineChoice(ch, inv, comps, sceneId, rng, setting, zone);
+    if (ch) return fromRoutineChoice(ch, inv, comps, sceneId, rng, setting, zone, req.flags || []);
   }
 
   // Người lạ ngẫu nhiên
@@ -463,7 +466,11 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
         });
       }
       r.flags = [fx.tag];
-      if (fx.ending) r.ending = { is_game_over: false, is_victory: true, epilogue: fx.ending };
+      if (fx.ending) {
+        const choice = mc.id === 'm5_board_helo_with_cure' ? 'helo' : mc.id === 'm5_heroic_last_stand' ? 'last_stand' : 'wasteland';
+        const epilogue = composeEnding({ choice, flags: req.flags || [], companions: comps, base: req.base || {} });
+        r.ending = { is_game_over: false, is_victory: true, epilogue };
+      }
       r.deterministic = true;
       return r;
     }
@@ -479,7 +486,7 @@ const NODE_TABLE: Record<string, LootTableId> = {
   bridge: 'vehicle', industrial: 'hardware', tower: 'office', stadium: 'warehouse',
 };
 
-function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hops: number; visits: number; text: string }, req: any, rng: Rng, setting: Setting, zone: Zone): ChosenResolution {
+function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hops: number; visits: number; text: string; vehicle?: string; vcond: number; vfuel: number; crew: number }, req: any, rng: Rng, setting: Setting, zone: Zone): ChosenResolution {
   const node = getNodeAny(mt.nodeId);
   if (!node) return resolveCustom(mt.text, req.player?.inventory || [], req.companions || [], rng, setting, zone, req.turnCount || 1, req);
   const weather: WeatherType = req.weather || 'clear';
@@ -488,18 +495,55 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
   const r = blankRes('custom', '');
   r.deterministic = true;
 
-  let stamina = -(6 * hops + (thorough ? 9 : 3));
-  if (weather === 'heavy_rain' || weather === 'freezing_cold') stamina = Math.round(stamina * 1.2);
-  const stats: SceneStats = { stamina, hunger: 2 * hops, thirst: 2 * hops, hp: 0, sanity: 0 };
+  // Xe cộ: đi nhanh, nhẹ sức, nhưng tốn xăng và gặp sự cố. Hết xăng thì phải đi bộ.
+  const vdef = mt.vehicle && VEHICLES[mt.vehicle as VehicleKind] ? VEHICLES[mt.vehicle as VehicleKind] : undefined;
+  const needFuel = vdef ? fuelNeededRoundTrip(vdef.kind, hops) : 0;
+  const useVehicle = !!vdef && mt.vfuel >= needFuel && mt.vcond > 0;
+  const crew = Math.max(0, Math.min(mt.crew || 0, vdef ? vdef.crew : 0));
+  const speed = useVehicle && vdef ? vdef.speed : 1;
+  let stamina = -(6 * hops + (thorough ? 9 : 3)) * speed;
+  if (weather === 'heavy_rain' || weather === 'freezing_cold') stamina = stamina * 1.2;
+  stamina = Math.round(stamina);
+  const stats: SceneStats = { stamina, hunger: Math.round(2 * hops * speed) + crew, thirst: Math.round(2 * hops * speed) + crew, hp: 0, sanity: 0 };
+  let vCond = 0;
+  let vFuel = 0;
 
   const lines: string[] = [];
   if (zone !== 'shelter') lines.push(moveText(setting, zone, 'shelter'));
   lines.push(`Bạn chuẩn bị đồ rồi rời ${setting.labels.shelter} đi một chuyến dài.`);
-  lines.push(hops === 1
-    ? `Bạn lách qua những con ngõ quen thuộc để tới ${node.name} (${REGION_LABEL[node.region]}).`
-    : `Bạn băng qua ${hops} chặng đường, tránh các ổ zombie để tiến sâu vào ${REGION_LABEL[node.region].toLowerCase()}: ${node.name}.`);
+  if (vdef && !useVehicle) lines.push(mt.vcond <= 0 ? `${vdef.name} đã hỏng nặng nên bạn phải đi bộ.` : `${vdef.name} không đủ nhiên liệu cho cả đi lẫn về nên bạn phải bỏ xe lại, đi bộ.`);
+  if (useVehicle && vdef) {
+    lines.push(`Bạn khởi động ${vdef.name.toLowerCase()}${crew ? ` chở thêm ${crew} người` : ''}, tiếng máy xé toang cái im lặng của khu phố rồi lao về phía ${node.name} (${REGION_LABEL[node.region]}).`);
+    vFuel -= needFuel;
+    if (vdef.noise >= 3) stats.sanity = (stats.sanity || 0) - 1;
+  } else {
+    lines.push(hops === 1
+      ? `Bạn lách qua những con ngõ quen thuộc để tới ${node.name} (${REGION_LABEL[node.region]}).`
+      : `Bạn băng qua ${hops} chặng đường, tránh các ổ zombie để tiến sâu vào ${REGION_LABEL[node.region].toLowerCase()}: ${node.name}.`);
+  }
 
-  const encounterChance = 0.08 + node.danger * 0.04 + (thorough ? 0.08 : 0);
+  if (useVehicle && vdef) {
+    // Mỗi chặng có thể gặp sự cố; xe ồn dễ thu hút bầy, đồng đội đi cùng giúp giảm thiệt hại, giáp xe cũng vậy
+    const shield = Math.max(0.35, 1 - 0.18 * vdef.armor - 0.2 * crew);
+    let anyRoad = false;
+    for (let i = 0; i < hops; i++) {
+      if (rng() < 0.3 + vdef.noise * 0.06 + node.danger * 0.03) {
+        const ev = pickFrom(ROAD_EVENTS, rng);
+        anyRoad = true;
+        lines.push(ev.text);
+        stats.hp = (stats.hp || 0) + Math.round((ev.hp || 0) * shield);
+        stats.sanity = (stats.sanity || 0) + (ev.sanity || 0);
+        stats.stamina = (stats.stamina || 0) + (ev.stamina || 0);
+        vCond += Math.round((ev.condition || 0) * shield);
+        vFuel += ev.fuel || 0;
+        if (ev.loseFood) r.lose.push({ name: 'Đồ hộp', quantity: ev.loseFood });
+      }
+    }
+    if (!anyRoad) lines.push(pickFrom(SAFE_ROAD_LINES, rng));
+    vCond -= 2 * hops; // hao mòn tự nhiên
+    r.vehicleDelta = { condition: vCond, fuel: vFuel };
+  }
+  const encounterChance = (useVehicle ? 0.03 : 0.08) + node.danger * 0.04 + (thorough ? 0.08 : 0);
   let hit = 0;
   for (let i = 0; i < hops; i++) if (rng() < encounterChance) hit++;
   if (hit) {
@@ -534,6 +578,10 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
   } else {
     lines.push('Bạn lục soát nhanh, nhặt những thứ dễ lấy nhất rồi rút lui trong im lặng.');
   }
+  if (crew > 0 && table) {
+    gained.push(...rollLoot(table, crew, rng));
+    lines.push(`Có ${crew} người đi cùng nên bạn mang về được nhiều hơn.`);
+  }
   if (!gained.length) lines.push('Nơi này gần như đã bị vét sạch từ những lần ghé trước, bạn quay về tay không.');
   else if (mt.visits > 0) lines.push('Vật tư ở đây đã vơi đi nhiều sau những lần ghé trước.');
   lines.push(`Cuối cùng bạn quay trở về ${setting.labels.shelter}, mệt lả.`);
@@ -545,7 +593,7 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
   return r;
 }
 
-function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId: string, rng: Rng, setting: Setting, zone: Zone): ChosenResolution {
+function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId: string, rng: Rng, setting: Setting, zone: Zone, flags: string[] = []): ChosenResolution {
   const medic = sceneId === 'r_wound_care' ? comps.find((c) => /Uyên|Giang|y tá|dược sĩ|sinh viên y/i.test(`${realNameOf(c)} ${c.role || ''}`) && c.status !== 'deceased') : undefined;
   const miss = medic ? undefined : (ch.requires || []).find((q) => !hasItem(inv, q.re));
   if (miss) return failMissing('routine', miss.label);
@@ -553,9 +601,27 @@ function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId:
   r.stats = { ...(ch.stats || {}) };
   r.gain = [...toItems(ch.gain)];
   const rolls = ch.roll ? (Array.isArray(ch.roll) ? ch.roll : [ch.roll]) : [];
-  for (const ro of rolls) if (rng() < (ro.chance ?? 1)) r.gain.push(...rollLoot(ro.table, ro.n, rng));
+  // Trạm y tế bị cô lập: nguồn lực khan hiếm hơn hẳn
+  const scarcity = setting.id === 'clinic_containment' ? 0.75 : 1;
+  for (const ro of rolls) if (rng() < (ro.chance ?? 1) * scarcity) r.gain.push(...rollLoot(ro.table, ro.n, rng));
   if (ch.flags) r.flags = [...ch.flags];
   if (ch.flagsRemove) r.flagsRemove = [...ch.flagsRemove];
+  // Cờ động: quét tầng chung cư / lục nhà hàng xóm theo thứ tự thực tế
+  if (ch.dynFlags === 'floor') {
+    const isHouse = setting.id === 'private_house';
+    const prefix = isHouse ? 'house_' : 'floor_';
+    const done = flags.filter((f) => f.startsWith(prefix)).length;
+    const idx = isHouse ? done + 1 : Math.max(1, 6 - done);
+    r.flags = [...(r.flags || []), prefix + idx];
+    if (!isHouse && done + 1 >= 5) {
+      r.flags.push('building_secured');
+      r.outcome += ' Tầng cuối cùng đã sạch: cả tòa chung cư giờ nằm trong tay bạn.';
+    }
+    if (isHouse && done + 1 >= 4 && !flags.includes('neighborhood_known')) {
+      r.flags.push('neighborhood_known');
+      r.outcome += ' Bạn đã nắm rõ cả dãy nhà quanh ngõ: lối trèo, nhà nào an toàn, nhà nào có người.';
+    }
+  }
   r.lose = (ch.lose || []).filter((l) => hasItem(inv, new RegExp(l.name, 'i')));
   if (ch.healWound) r.woundChange = { healed: true };
   if (ch.inflictWound) r.woundChange = { inflicted: true, location: ch.inflictWound };
@@ -570,7 +636,10 @@ function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId:
   }
   if (ch.consumeFood && !applyEating(r, inv, ch.consumeFood, ch.foodMult ?? 1)) return failMissing('routine', 'thức ăn');
   if (ch.drink && !applyDrinking(r, inv)) r.outcome += ' Nhưng bình nước đã trống trơn.';
-  if (ch.go) withMove(r, setting, zone, ch.go);
+  if (ch.go === 'outside' && setting.id === 'clinic_containment' && !flags.includes('clinic_breach')) {
+    r.outcome += ' Nhưng cổng phụ của trạm bị chặn kín bởi rào cách ly và xác xe: bạn chưa thể ra ngoài được.';
+    withMove(r, setting, zone, 'near');
+  } else if (ch.go) withMove(r, setting, zone, ch.go);
   r.deterministic = true;
   return r;
 }
@@ -630,6 +699,10 @@ function resolveCustom(action: string, inv: any[], comps: any[], rng: Rng, setti
   const place = PLACE_HINTS.find((p) => p.re.test(a));
   let dest = detectDestination(a, setting.hasRoof);
   if (!dest && place && !(place.zone === 'roof' && !setting.hasRoof)) dest = place.zone;
+  if (dest === 'outside' && setting.id === 'clinic_containment' && !(req?.flags || []).includes('clinic_breach')) {
+    parts.push('Cổng trạm y tế bị chặn kín bởi rào cách ly và xác xe, bạn chưa thể ra ngoài được. Phải tìm cách phá cổng trước.');
+    dest = 'near';
+  }
   let at: Zone = zone;
   if (dest && dest !== zone) {
     parts.push(moveText(setting, zone, dest));
@@ -766,15 +839,18 @@ const SCENE_ZONES: Record<string, Zone[]> = {
   milestone_4_mutation_crisis: ['shelter', 'near'], milestone_5_final_evacuation: ['outside'],
 };
 
-function transition(id: string, zone: Zone, setting: Setting): { zone: Zone; lead: string } {
+function transition(id: string, zone: Zone, setting: Setting, lock = false): { zone: Zone; lead: string } {
   const allowed = SCENE_ZONES[id];
   if (!allowed || allowed.includes(zone)) return { zone, lead: '' };
-  const target = allowed[0];
+  // Trạm y tế bị phong tỏa: không sự kiện nào được kéo bạn ra ngoài khi chưa phá cổng
+  const options = lock ? allowed.filter((z) => z !== 'outside') : allowed;
+  if (!options.length) return { zone, lead: '' };
+  const target = options[0];
   return { zone: target, lead: moveText(setting, zone, target) };
 }
 
-function eventScene(ev: RandomEvent, inv: any[], leadIn: string, zone: Zone, setting: Setting): NextScene {
-  const t = transition(ev.id, zone, setting);
+function eventScene(ev: RandomEvent, inv: any[], leadIn: string, zone: Zone, setting: Setting, lock = false): NextScene {
+  const t = transition(ev.id, zone, setting, lock);
   const choices = ev.choices.map((c) => {
     const miss = (CHOICE_REQUIREMENTS[c.id] || []).filter((q) => !hasItem(inv, q.re));
     return miss.length ? `${c.text} [Thiếu: ${miss.map((m) => m.label).join(', ')}]` : c.text;
@@ -787,9 +863,9 @@ function eventScene(ev: RandomEvent, inv: any[], leadIn: string, zone: Zone, set
   };
 }
 
-function milestoneScene(id: string, zone: Zone, setting: Setting): NextScene {
+function milestoneScene(id: string, zone: Zone, setting: Setting, lock = false): NextScene {
   const m = milestoneById(id)!;
-  const t = transition(id, zone, setting);
+  const t = transition(id, zone, setting, lock);
   return {
     id, kind: 'milestone', zone: t.zone,
     situation: `${m.title}\n\n${t.lead ? t.lead + ' ' : ''}${MS_LEAD_IN[id] || ''} ${m.description}\n\n${m.contextPrompt}`,
@@ -798,9 +874,10 @@ function milestoneScene(id: string, zone: Zone, setting: Setting): NextScene {
   };
 }
 
-function strangerNextScene(spec: StrangerSpec, zone: Zone, setting: Setting): NextScene {
+function strangerNextScene(spec: StrangerSpec, zone: Zone, setting: Setting, lock = false): NextScene {
   const sc = strangerScene(spec, setting);
-  const zones = strangerZones(spec);
+  const zones = lock ? strangerZones(spec).filter((z) => z !== 'outside') : strangerZones(spec);
+  if (!zones.length) zones.push('near');
   let z: Zone = zone;
   let lead = '';
   if (!zones.includes(zone)) { z = zones[0]; lead = moveText(setting, zone, z); }
@@ -894,6 +971,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     }
   }
 
+  const lockOutside = setting.id === 'clinic_containment' && !(req.flags || []).includes('clinic_breach');
   let next: NextScene | null = null;
   let consumedPending: string | null = null;
   const finalDay = nextDay >= 30;
@@ -904,7 +982,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
       const m = STORY_MILESTONES[i];
       if (done.includes(m.id)) continue;
       if (m.id === 'milestone_4_mutation_crisis' && comps.length === 0) continue;
-      if (!MS_VIA_PENDING.has(m.id) && nextDay >= MS_MIN_DAY[i]) next = milestoneScene(m.id, zone, setting);
+      if (!MS_VIA_PENDING.has(m.id) && nextDay >= MS_MIN_DAY[i]) next = milestoneScene(m.id, zone, setting, lockOutside);
       break;
     }
     // 2) Sự kiện đã lên lịch đến hạn.
@@ -912,19 +990,19 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
       const due = pending.find((p) => p.dueDay <= nextDay);
       if (due) {
         consumedPending = due.id;
-        next = due.id.startsWith('milestone_') ? milestoneScene(due.id, zone, setting) : eventScene(eventById(due.id)!, inv, LEAD_IN[due.id] || '', zone, setting);
+        next = due.id.startsWith('milestone_') ? milestoneScene(due.id, zone, setting, lockOutside) : eventScene(eventById(due.id)!, inv, LEAD_IN[due.id] || '', zone, setting, lockOutside);
       }
     }
     // 3) Bão do dự báo ứng nghiệm.
     if (!next && newDay && weather === 'heavy_rain' && count('event_acid_rain_superstorm') < 3) {
-      next = eventScene(eventById('event_acid_rain_superstorm')!, inv, LEAD_IN.event_acid_rain_superstorm, zone, setting);
+      next = eventScene(eventById('event_acid_rain_superstorm')!, inv, LEAD_IN.event_acid_rain_superstorm, zone, setting, lockOutside);
     }
     // 4) Sự kiện ngẫu nhiên: người lạ không rõ tên, hoặc sự kiện có sẵn (đã đủ điều kiện).
     if (!next && nextDay >= 2 && rng() < randomEventChance(nextDay, ctx.baseType, sinceSpecial)) {
       const strangerCount = done.filter((d) => d.startsWith('stranger:')).length;
       const canStranger = comps.length < 3 && strangerCount < 8;
       if (canStranger && rng() < 0.6 * Math.max(0.35, seenW('stranger'))) {
-        next = strangerNextScene(rollStranger(rng, zone), zone, setting);
+        next = strangerNextScene(rollStranger(rng, zone), zone, setting, lockOutside);
       } else {
         const pool = RANDOM_EVENTS.filter((e) => {
           const rule = EVENT_RULES[e.id];
@@ -937,7 +1015,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
         });
         if (pool.length) {
           const ev = weightedPick(pool.map((e) => ({ v: e, w: seenW(e.id) })), rng);
-          next = eventScene(ev, inv, LEAD_IN[ev.id] || '', zone, setting);
+          next = eventScene(ev, inv, LEAD_IN[ev.id] || '', zone, setting, lockOutside);
         }
       }
     }
@@ -951,6 +1029,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     const recent = done.slice(-5);
     const needRecent = done.slice(-4);
     const eligible = ROUTINE_SCENES.filter((s) => s.zones.includes(zoneNow) && (!s.only || s.only.includes(setting.id)) && (!s.when || s.when(ctx)));
+    if (!eligible.length) eligible.push(...ROUTINE_SCENES.filter((s) => s.zones.includes('near') && (!s.only || s.only.includes(setting.id))));
     const awayTooLong = zoneNow !== 'shelter' && (awayTurns >= 3 || ctx.stamina < 25);
     const returns = eligible.filter((s) => /^r_(return_|roof_return)/.test(s.id));
     const urgent = eligible.filter((s) => s.need && s.need(ctx) && !needRecent.includes(s.id));
@@ -996,10 +1075,11 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
 
   const radio = intel.length ? buildRadioTransmission(intel, { baseType: ctx.baseType, day: nextDay }, rng) : null;
 
+  const isolated = setting.id === 'clinic_containment';
   const baseStats = {
     hp: 0, infection: 0,
-    hunger: 6,
-    thirst: ctx.waterCut ? 12 : 8,
+    hunger: isolated ? 8 : 6,
+    thirst: (ctx.waterCut ? 12 : 8) + (isolated ? 2 : 0),
     stamina: -9,
     sanity: ctx.blackout ? -3 : -2,
   };
@@ -1096,6 +1176,7 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
         }
       : undefined,
     soundCue: plan.next.soundCue,
+    vehicle_delta: r.vehicleDelta || null,
     _needMap: plan.needMap,
   };
 }

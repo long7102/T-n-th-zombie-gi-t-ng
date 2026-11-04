@@ -67,10 +67,14 @@ import { CompanionChat, ChatMsg } from './components/CompanionChat';
 import { computeTeamEffects } from './utils/teamEffects';
 import type { RoleId } from './data/companionChat';
 import { SceneIllustration } from './components/SceneIllustration';
-import { encodeMapAction, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance } from './data/worldMap';
+import { encodeMapAction, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
 import { BaseHub } from './components/BaseHub';
 import { tickBase, payCost, MODULE_BY_ID, SHELTER_SUITABILITY } from './utils/baseSystem';
 import { getSetting } from './data/settings';
+import { WorldSummaryModal } from './components/WorldSummaryModal';
+import { buildWorldSummary, eventsFromFlags, WorldEvent } from './data/worldState';
+import { computeQuests, factionStanding, FLAG_TEXT } from './data/storyArc';
+import { Vehicle, VehicleKind, VEHICLES, REPAIR_COST, FUEL_RE, FUEL_PER_CAN } from './data/vehicles';
 import { sound } from './utils/audio';
 
 const SAVE_KEY = 'zombie-survival-save-v1';
@@ -183,6 +187,11 @@ export default function App() {
   // Cứ điểm ngẫu nhiên quanh căn cứ (mỗi ván một bộ khác nhau) và trạng thái vòng khép kín của căn cứ
   const [outposts, setOutposts] = useState<OutpostInstance[]>([]);
   const outpostNodes = useMemo(() => buildOutpostNodes(outposts), [outposts]);
+  const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+
+  // Nhật ký sự kiện quan trọng + tóm tắt trạng thái thế giới (ký ức dài hạn)
+  const [worldLog, setWorldLog] = useState<WorldEvent[]>([]);
+  const [showWorldSummary, setShowWorldSummary] = useState(false);
   const [loopStatus, setLoopStatus] = useState<Record<string, 'ok' | 'starved' | 'off'>>({});
 
   // Lưu/tiếp tục ván chơi (localStorage; có thể bị chặn nên luôn bọc try/catch)
@@ -240,7 +249,7 @@ export default function App() {
         const snapshot = {
           player, base, companions, day, turnCount, location, weather, weatherLabel, tomorrowForecast,
           backgroundEffect, dangerLevel, history: history.slice(-60), currentTurn, pendingEvents, visitedNodes, mapVisits,
-          settingId, zone, awayTurns, worldFlags, outposts,
+          settingId, zone, awayTurns, worldFlags, outposts, vehicle, worldLog,
         };
         localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
         setHasSave(true);
@@ -279,6 +288,8 @@ export default function App() {
       setAwayTurns(s.awayTurns || 0);
       setWorldFlags(s.worldFlags || []);
       setOutposts(s.outposts || generateOutposts(4));
+      setVehicle(s.vehicle || null);
+      setWorldLog(s.worldLog || []);
       setActiveEmergency(false);
       setGamePhase('playing');
     } catch {
@@ -458,6 +469,7 @@ export default function App() {
           zone,
           awayTurns,
           flags: worldFlags,
+          worldSummary: makeSummary().text,
           seenBefore: loadSeen(),
           turnCount,
           tomorrowForecast,
@@ -765,11 +777,31 @@ export default function App() {
         game_ending: data.game_ending,
       };
 
+      if (data.vehicle_delta) {
+        setVehicle((v) => (v ? { ...v, condition: Math.max(0, Math.min(100, v.condition + (data.vehicle_delta.condition || 0))), fuel: Math.max(0, Math.min(VEHICLES[v.kind].maxFuel, v.fuel + (data.vehicle_delta.fuel || 0))) } : v));
+      }
       setPendingEvents(data.pending_events || []);
       setZone(data.zone || zone);
       setAwayTurns(data.awayTurns ?? 0);
       setWorldFlags((prev) => [...new Set([...prev, ...(data.flags_add || [])])].filter((f) => !(data.flags_remove || []).includes(f)));
       setAiNote(data.ai_note || '');
+      {
+        const evts: WorldEvent[] = [...eventsFromFlags(data.flags_add || [], nextDay, nextTurnNum)];
+        const sid: string = data.scene_id || '';
+        if (data.newCompanion) evts.push({ day: nextDay, turn: nextTurnNum, kind: 'relation', text: 'Một người sống sót mới gia nhập nhóm (chưa biết tên)' });
+        if (sid.startsWith('milestone_')) evts.push({ day: nextDay, turn: nextTurnNum, kind: 'story', text: 'Một bước ngoặt cốt truyện xảy ra' });
+        if (sid === 'event_horde_night') evts.push({ day: nextDay, turn: nextTurnNum, kind: 'world', text: 'Một bầy zombie lớn kéo ngang khu phố' });
+        if (sid === 'event_supply_drop') evts.push({ day: nextDay, turn: nextTurnNum, kind: 'world', text: 'Thùng tiếp tế rơi gần khu vực của bạn' });
+        if (sid === 'event_acid_rain_superstorm') evts.push({ day: nextDay, turn: nextTurnNum, kind: 'world', text: 'Bão mưa lớn đổ bộ như dự báo' });
+        if (sid.startsWith('stranger:')) evts.push({ day: nextDay, turn: nextTurnNum, kind: 'relation', text: 'Gặp một người lạ ngẫu nhiên' });
+        if (data.system_note && /CỘT MỐC NGÀY/.test(data.system_note)) evts.push({ day: nextDay, turn: nextTurnNum, kind: 'world', text: String(data.system_note).replace('⚠️ ', '') });
+        if (evts.length) setWorldLog((prev) => [...prev, ...evts].slice(-60));
+        if ((data.flags_add || []).includes('building_secured')) {
+          setBase((b) => ({ ...b, fortification: Math.min(100, b.fortification + 20) }));
+          setRecentBaseBanner('Đã làm chủ cả tòa nhà (+20% kiên cố)');
+          setTimeout(() => setRecentBaseBanner(null), 6000);
+        }
+      }
       bumpSeen(data.scene_id);
       if (data.radio_transmission) sound.playRadioStatic();
       if (typeof data.scene_id === 'string' && data.scene_id.startsWith('milestone_')) sound.playStinger();
@@ -795,7 +827,7 @@ export default function App() {
   };
 
   // Di chuyển & lục soát từ bản đồ: hành động được mã hóa để server xử lý tất định theo quãng đường/độ nguy hiểm.
-  const handleTravelFromMap = (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number) => {
+  const handleTravelFromMap = (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number, opts: { useVehicle: boolean; crew: number } = { useVehicle: false, crew: 0 }) => {
     if (isAiProcessing) return;
     setShowMapModal(false);
     const visits = mapVisits[node.id] || 0;
@@ -804,7 +836,11 @@ export default function App() {
       : `Tôi di chuyển đến ${node.name} (${hops} chặng), dùng xà beng phá khóa tủ sắt và chấp nhận rủi ro tiếng động để tìm vật tư cao cấp.`;
     setMapVisits((prev) => ({ ...prev, [node.id]: (prev[node.id] || 0) + 1 }));
     setVisitedNodes((prev) => (prev.includes(node.id) ? prev : [...prev, node.id]));
-    handleExecuteTurn(encodeMapAction(node.id, lootStyle, hops, visits, text), 'choice');
+    if (opts.useVehicle && vehicle) sound.playEngine();
+    handleExecuteTurn(
+      encodeMapAction(node.id, lootStyle, hops, visits, text, opts.useVehicle && vehicle ? { vehicle: vehicle.kind, vcond: vehicle.condition, vfuel: vehicle.fuel, crew: opts.crew } : { crew: 0 }),
+      'choice',
+    );
   };
 
   // Use Item from Inventory
@@ -1057,6 +1093,19 @@ export default function App() {
     setCompanions(updatedComps);
   };
 
+  // Tóm tắt trạng thái thế giới: dựng từ trạng thái hiện tại + nhật ký sự kiện
+  const makeSummary = () =>
+    buildWorldSummary({
+      day, turn: turnCount, weatherLabel, forecastLabel: tomorrowForecast?.label, locationText: location, dangerLevel,
+      flags: worldFlags, companions, base, inventory: player.inventory, vehicle,
+      visitedNames: visitedNodes.map((id) => getNodeAny(id)?.name || '').filter(Boolean),
+      outpostNames: [],
+      stats: { hp: player.stats.hp, maxHp: player.stats.maxHp, hunger: player.stats.hunger, thirst: player.stats.thirst, infection: player.stats.infection, sanity: player.stats.sanity, stamina: player.stats.stamina },
+      equippedWeapon: player.equippedWeapon?.name,
+      log: worldLog,
+    });
+  const pushLog = (kind: WorldEvent['kind'], text: string) => setWorldLog((prev) => [...prev, { day, turn: turnCount, kind, text }].slice(-60));
+
   // Lập căn cứ tại chỗ trú hiện tại
   const handleEstablishBase = () => {
     const st = getSetting(settingId);
@@ -1075,6 +1124,7 @@ export default function App() {
     }));
     setRecentBaseBanner(`Căn cứ ${st.place}`);
     setTimeout(() => setRecentBaseBanner(null), 6000);
+    pushLog('survival', `Lập căn cứ tại ${st.labels.shelter}`);
   };
 
   // Xây hoặc nâng cấp một công trình: trừ vật tư (ba lô trước, rồi kho căn cứ)
@@ -1120,6 +1170,46 @@ export default function App() {
     }));
     setRecentBaseBanner(node.outpost.baseName);
     setTimeout(() => setRecentBaseBanner(null), 6000);
+    pushLog('survival', `Chiếm ${node.name} làm căn cứ mới`);
+  };
+
+  // Lắp xe từ phụ tùng; sửa xe; đổ xăng
+  const handleBuildVehicle = (kind: VehicleKind) => {
+    const paid = payCost(VEHICLES[kind].cost, player.inventory, base.warehouse);
+    if (!paid) return;
+    sound.playLoot();
+    setPlayer({ ...player, inventory: paid.backpack });
+    setBase({ ...base, warehouse: paid.warehouse });
+    setVehicle({ kind, condition: 70, fuel: 0 });
+    pushLog('survival', `Lắp ráp ${VEHICLES[kind].name}`);
+    setRecentBaseBanner(`Đã lắp ${VEHICLES[kind].name}`);
+    setTimeout(() => setRecentBaseBanner(null), 5000);
+  };
+  const handleRepairVehicle = () => {
+    if (!vehicle) return;
+    const paid = payCost(REPAIR_COST, player.inventory, base.warehouse);
+    if (!paid) return;
+    sound.playLoot();
+    setPlayer({ ...player, inventory: paid.backpack });
+    setBase({ ...base, warehouse: paid.warehouse });
+    setVehicle({ ...vehicle, condition: Math.min(100, vehicle.condition + 35) });
+  };
+  const handleRefuelVehicle = () => {
+    if (!vehicle) return;
+    const max = VEHICLES[vehicle.kind].maxFuel;
+    if (vehicle.fuel >= max) return;
+    const takeOne = (items: Item[]) => {
+      const it = items.find((i) => FUEL_RE.test(i.name) && i.category === 'material' && i.quantity > 0);
+      if (!it) return null;
+      return items.map((i) => (i.id === it.id ? { ...i, quantity: i.quantity - 1 } : i)).filter((i) => i.quantity > 0);
+    };
+    const bp = takeOne(player.inventory);
+    const wh = bp ? null : takeOne(base.warehouse);
+    if (!bp && !wh) return;
+    sound.playLoot();
+    if (bp) setPlayer({ ...player, inventory: bp });
+    if (wh) setBase({ ...base, warehouse: wh });
+    setVehicle({ ...vehicle, fuel: Math.min(max, vehicle.fuel + FUEL_PER_CAN) });
   };
 
   // Giao việc cho đồng đội (từ giao diện hoặc từ lời nói trong khung chat)
@@ -1385,6 +1475,8 @@ export default function App() {
     setAwayTurns(0);
     setWorldFlags([]);
     setOutposts([]);
+    setVehicle(null);
+    setWorldLog([]);
     setLoopStatus({});
     setTomorrowForecast(undefined);
     setLootNotifications([]);
@@ -1418,6 +1510,14 @@ export default function App() {
         cityWaterCutoff={day >= 7}
         cityPowerBlackout={day >= 10}
       />
+
+      {/* Lớp hạt nhiễu phim + tối góc: cảm giác tranh than chì, giấy ố, bụi tro */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 z-[5] opacity-[0.16] mix-blend-overlay"
+        style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5  0 0 0 0 0.45  0 0 0 0 0.4  0 0 0 0.9 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")" }}
+      />
+      <div aria-hidden className="pointer-events-none fixed inset-0 z-[5]" style={{ background: 'radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(8,5,2,0.55) 100%)' }} />
 
       {/* Loot Notification Pop-up Toast */}
       <LootToast
@@ -1494,6 +1594,14 @@ export default function App() {
                     <span className="text-[9px] font-mono text-amber-400/90 bg-neutral-900 px-1 py-0.5 rounded border border-neutral-800">
                       ~{tomorrowForecast.accuracyPercent}%
                     </span>
+                  </div>
+                )}
+
+                {vehicle && (
+                  <div className="flex items-center gap-1.5 bg-sky-950/40 border border-sky-800/50 px-2 py-1 rounded text-sky-300 font-mono text-[11px]" title="Xe của bạn">
+                    <span>{VEHICLES[vehicle.kind].icon}</span>
+                    <span>⛽{Math.round(vehicle.fuel)}</span>
+                    <span>🔧{Math.round(vehicle.condition)}%</span>
                   </div>
                 )}
 
@@ -1575,10 +1683,10 @@ export default function App() {
                 <button
                   onClick={() => {
                     sound.playClick();
-                    setShowChronicle(true);
+                    setShowWorldSummary(true);
                   }}
                   className="p-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 rounded text-sky-400 transition-colors cursor-pointer"
-                  title="Nhật ký 5 nhánh cốt truyện"
+                  title="Tóm tắt trạng thái thế giới"
                 >
                   <BookOpen className="w-4 h-4" />
                 </button>
@@ -1965,6 +2073,11 @@ export default function App() {
           loopStatus={loopStatus}
           onEstablish={handleEstablishBase}
           onBuild={handleBuildModule}
+          companions={companions}
+          vehicle={vehicle}
+          onBuildVehicle={handleBuildVehicle}
+          onRepairVehicle={handleRepairVehicle}
+          onRefuelVehicle={handleRefuelVehicle}
           onStoreItem={handleStoreItem}
           onRetrieveItem={handleRetrieveItem}
           onClose={() => setShowBaseModal(false)}
@@ -1982,6 +2095,8 @@ export default function App() {
           baseNodeId={base.baseNodeId}
           hasBase={base.hasBase}
           onClaimBase={handleClaimBase}
+          vehicle={vehicle}
+          crewAvailable={companions.filter((c) => c.status !== 'deceased' && c.hp >= 25).length}
           onTravel={handleTravelFromMap}
           onClose={() => setShowMapModal(false)}
         />
@@ -2024,6 +2139,21 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {showWorldSummary && (() => {
+        const summary = makeSummary();
+        return (
+          <WorldSummaryModal
+            summary={summary}
+            quests={computeQuests({ flags: worldFlags, day, fortification: base.fortification, hasBase: base.hasBase, companionsAlive: companions.filter((c) => c.status !== 'deceased').length })}
+            factions={factionStanding(worldFlags)}
+            flagsText={worldFlags.filter((f) => FLAG_TEXT[f] && !/^clue_/.test(f)).map((f) => FLAG_TEXT[f])}
+            clueIds={worldFlags.filter((f) => /^clue_/.test(f))}
+            log={worldLog}
+            onClose={() => setShowWorldSummary(false)}
+          />
+        );
+      })()}
 
       {showChronicle && (
         <ChronicleModal

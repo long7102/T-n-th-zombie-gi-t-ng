@@ -1,6 +1,7 @@
 import { Item, WeatherType } from '../types/game';
 import { Setting, Zone } from './settings';
 import { LootTableId } from './lootTables';
+import { CLUES } from './storyArc';
 
 // ====================================================================
 // KHO CẢNH SINH TỒN THƯỜNG NGÀY, GẮN VỚI "VÙNG" (zone).
@@ -48,6 +49,7 @@ export interface RoutineChoice {
   roll?: Roll | Roll[];         // bốc loot ngẫu nhiên từ một hoặc nhiều bảng
   flags?: string[];             // hậu quả lâu dài của quyết định (ghi nhớ trong thế giới)
   flagsRemove?: string[];       // xóa các hậu quả đã được giải quyết
+  dynFlags?: 'floor';           // cờ động: tầng chung cư đã quét sạch
   lose?: { name: string; quantity: number }[];
   go?: Zone;                    // đổi vùng (director chèn câu di chuyển)
   inflictWound?: string;
@@ -121,7 +123,148 @@ export const OPENING_SETS: [RoutineChoice, RoutineChoice, RoutineChoice][] = [
   ],
 ];
 
+// ---------- Manh mối bí ẩn dịch bệnh ----------
+const clueScene = (n: number, day: number, zones: Zone[], primary: Zone, situation: string, only?: string[]): RoutineScene => ({
+  id: 'r_clue_' + n, zones, primary, weight: 3, only,
+  when: (c) => c.day >= day && !c.flags.includes('clue_' + n),
+  situation: () => situation,
+  choices: [
+    { text: 'Đọc thật kỹ từng dòng và ghi nhớ nội dung', outcome: 'Bạn đọc chậm từng chữ, tay hơi run. Điều bạn đọc được: "' + CLUES[n - 1].text + '" (Manh mối: ' + CLUES[n - 1].title + ').', stats: { stamina: -3, sanity: -3 }, flags: ['clue_' + n] },
+    { text: 'Gom hết mang về chỗ trú, đọc sau khi an toàn', outcome: 'Bạn nhét cả xấp giấy vào ba lô rồi rút lui. Tối đó, dưới ánh nến, bạn mới đọc được: "' + CLUES[n - 1].text + '" (Manh mối: ' + CLUES[n - 1].title + ').', stats: { stamina: -6 }, flags: ['clue_' + n], roll: { table: 'household', n: 1, chance: 0.5 } },
+    { text: 'Bỏ qua, những thứ này không giúp bạn sống thêm ngày nào', outcome: 'Bạn quay đi. Có lẽ đó là quyết định thực dụng, nhưng câu hỏi "chuyện gì đã xảy ra" vẫn còn nguyên đó.', stats: { sanity: 1 } },
+  ],
+});
+
+const STORY_SCENES: RoutineScene[] = [
+  clueScene(1, 3, ['near', 'outside'], 'near', 'Gần {near}, một thi thể mặc áo blouse trắng ngồi tựa tường, hai tay vẫn ôm chặt một cuốn sổ bìa cứng thấm máu. Không giống người chết vì zombie: trên cổ không có vết cắn.'),
+  clueScene(2, 5, ['outside', 'near'], 'outside', 'Trong một văn phòng bị phá cửa ở {outside}, dưới gầm bàn có một chiếc thùng hồ sơ dán nhãn "MẬT". Ai đó đã cố giấu nó trước khi bỏ chạy.'),
+  clueScene(3, 8, ['near', 'outside'], 'near', 'Một tủ lạnh y tế còn nguyên khóa bị đẩy nghiêng ở gần {near}. Bên trong là những ống nghiệm dán nhãn tay và một xấp giấy ghi công thức viết vội.'),
+  clueScene(4, 11, ['shelter', 'roof'], 'shelter', 'Khi bạn vặn núm dò sóng, giữa tiếng rè rè bỗng vang lên một giọng nói bình tĩnh đến lạ lùng, lặp đi lặp lại cùng một bản tin.'),
+  clueScene(5, 14, ['outside'], 'outside', 'Một chiếc xe quân đội lật nghiêng bên đường ở {outside}, cửa mở toang. Trong hộc đựng đồ có một phong bì dán kín, đóng dấu đỏ.'),
+  clueScene(6, 17, ['near', 'shelter'], 'near', 'Một người đàn ông gầy gò gõ cửa ở {near}. Chiếc áo rách tơi tả để lộ mấy vết cắn đã khô, thế mà ông ta vẫn tỉnh táo và nhờ bạn nghe ông kể.'),
+  {
+    id: 'r_evac_contact', zones: ['roof', 'shelter'], primary: 'roof', weight: 4,
+    when: (c) => c.flags.includes('clue_4') && !c.flags.includes('evac_contact') && c.day >= 12,
+    situation: () => 'Bản tin sơ tán vẫn lặp lại trên sóng. Có một cách để liên lạc ngược lại: dùng bộ đàm hoặc nháy đèn pin theo mã mà tín hiệu ấy mô tả. Nhưng không ai biết ai đang ở đầu bên kia.',
+    choices: [
+      { text: 'Nháy đèn pin hoặc phát lại tín hiệu theo mã đã nghe', outcome: 'Sau ba lần lặp lại, đầu bên kia đáp lại một chuỗi ngắn: họ đã nhận được. Một giọng người xác nhận điểm sơ tán và hẹn bạn có mặt đúng ngày.', stats: { stamina: -4, sanity: 3 }, flags: ['evac_contact'] },
+      { text: 'Nghe lén thêm, ghi lại tần số và thời gian phát', outcome: 'Bạn ngồi nghe suốt đêm, ghi từng khoảng thời gian. Cuối cùng bạn xác định được điểm phát và biết cách liên lạc an toàn hơn.', stats: { stamina: -6, sanity: -2 }, flags: ['evac_contact'] },
+      { text: 'Không trả lời, nhỡ đó là bẫy', outcome: 'Bạn tắt máy. Nếu đó là bẫy, bạn vừa cứu mình; nếu không, bạn vừa bỏ lỡ cơ hội cuối cùng.', stats: { sanity: -2 } },
+    ],
+  },
+  {
+    id: 'r_sample_hunt', zones: ['outside'], primary: 'outside', weight: 3,
+    when: (c) => c.flags.includes('clue_3') && !c.flags.includes('sample_secured') && c.day >= 10,
+    situation: () => 'Bạn nhớ công thức huyết thanh: cần mẫu Alpha còn nguyên vẹn. Ở tầng hầm một cơ sở y tế gần {outside}, có một phòng lạnh đã bị phong tỏa. Nếu mẫu còn, nó nằm trong đó.',
+    choices: [
+      { text: 'Đột nhập thẳng vào phòng lạnh, lấy mẫu rồi chạy', outcome: 'Cửa phòng lạnh kẹt cứng, bạn phải dùng sức bẩy. Bên trong lạnh buốt, vài ống mẫu còn nguyên. Bạn vơ lấy rồi lao ra khi tiếng gầm đầu tiên vang lên từ hành lang.', stats: { hp: -8, stamina: -14, sanity: -3 }, roll: { table: 'pharmacy', n: 2 }, flags: ['sample_secured'] },
+      { text: 'Mặc đồ bảo hộ kín và hành động từ từ, đúng quy trình', outcome: 'Bạn bọc kín tay, che mặt rồi gỡ từng ống mẫu bằng kẹp. Chậm nhưng an toàn. Bạn niêm phong chúng trong hộp xốp cứng.', stats: { stamina: -8 }, requires: [{ re: /găng|áo khoác|áo|khăn che mặt|mũ/i, label: 'Đồ bảo hộ (găng/áo/khăn che mặt)' }], flags: ['sample_secured'] },
+      { text: 'Bỏ qua, quá nguy hiểm khi đi một mình', outcome: 'Bạn quay đi. Mẫu vẫn nằm đó, chờ người khác hoặc chờ thời gian làm hỏng nó.', stats: { sanity: 1 } },
+    ],
+  },
+  // ---------- Nhóm đối thủ tranh giành tài nguyên ----------
+  {
+    id: 'r_rival_meet', zones: ['outside'], primary: 'outside', weight: 3,
+    when: (c) => c.day >= 5 && !c.flags.includes('rival_met'),
+    situation: () => 'Bạn chưa kịp bước vào nhà kho ở {outside} thì thấy dấu vết mới: giày lạ, mẩu thuốc lá còn ấm. Từ trong vọng ra tiếng người bàn bạc. Một nhóm sống sót khác, tự gọi là "Đội Cây Cầu", cũng đang nhắm đúng chỗ này.',
+    choices: [
+      { text: 'Bước ra thương lượng: chia đôi đồ và hứa không chạm vào nhau', outcome: 'Thủ lĩnh nhóm nhìn bạn rất lâu rồi chìa tay. Họ chia đôi thực phẩm, và hai nhóm trao nhau lời hứa mong manh. Ít nhất hôm nay không ai phải đổ máu.', stats: { stamina: -6, sanity: 3 }, roll: [{ table: 'warehouse', n: 2 }], flags: ['rival_met', 'rival_allied'] },
+      { text: 'Phục kích, đánh gục họ trước khi họ kịp vào kho', outcome: 'Bạn bất ngờ lao vào, hai bên giằng co ác liệt. Bạn thắng, nhưng trúng đòn nặng, và những kẻ chạy thoát chắc chắn sẽ nhớ mặt bạn.', stats: { hp: -10, stamina: -14, sanity: -5 }, roll: [{ table: 'warehouse', n: 3 }, { table: 'weapons', n: 1, chance: 0.6 }], flags: ['rival_met', 'rival_hostile'] },
+      { text: 'Chờ họ rời đi rồi lén vào lấy phần còn lại', outcome: 'Bạn nấp sau đống thùng, đợi cả buổi. Khi họ đi, bạn mới lẻn vào lấy phần còn lại, nhưng để lại dấu giày, và họ sẽ biết có kẻ đã đến sau.', stats: { stamina: -8, sanity: -3 }, roll: [{ table: 'warehouse', n: 2 }], flags: ['rival_met', 'rival_hostile'] },
+    ],
+  },
+  {
+    id: 'r_rival_raid', zones: ['shelter'], primary: 'shelter', weight: 4,
+    when: (c) => c.flags.includes('rival_hostile') && !c.flags.includes('rival_raid_done') && c.day >= 8,
+    situation: () => 'Nửa đêm, bạn nghe tiếng cạy cửa. Qua khe hở bạn nhận ra đôi giày quen: Đội Cây Cầu đã lần theo dấu vết đến tận chỗ trú để lấy lại những gì họ cho là của mình.',
+    choices: [
+      { text: 'Chặn cửa và đánh trả bằng mọi thứ có trong tay', outcome: 'Cuộc đối đầu ngắn và dữ dội. Họ lùi đi để lại vết máu trên bậc thềm. Bạn thắng, nhưng cái giá là vết thương và nỗi sợ.', stats: { hp: -10, stamina: -12, sanity: -4 }, flags: ['rival_raid_done'] },
+      { text: 'Mở cửa, nộp một phần đồ để họ rời đi', outcome: 'Bạn đưa họ một phần thực phẩm. Thủ lĩnh gật đầu lạnh lùng và để bạn yên. Cái hận vẫn còn, nhưng chưa tới mức máu đổ.', stats: { sanity: -6 }, lose: [{ name: 'Gạo', quantity: 1 }, { name: 'Mì', quantity: 2 }], flags: ['rival_raid_done'], flagsRemove: ['rival_hostile'] },
+      { text: 'Đối thoại qua cánh cửa, đề nghị làm hòa', outcome: 'Mất cả đêm tranh luận qua cánh cửa. Cuối cùng họ chịu bắt tay giảng hòa, với điều kiện bạn chia phần vật tư lần sau.', stats: { stamina: -4, sanity: -2 }, flags: ['rival_raid_done', 'rival_allied'], flagsRemove: ['rival_hostile'] },
+    ],
+  },
+  {
+    id: 'r_rival_trade', zones: ['outside', 'near'], primary: 'outside', weight: 3,
+    when: (c) => c.flags.includes('rival_allied') && !c.flags.includes('rival_trade_done'),
+    situation: () => 'Đội Cây Cầu gửi người tới {near} đề nghị trao đổi: họ có vật tư mà bạn thiếu, đổi lấy tin tức hoặc đồ ăn. Một lời hứa mong manh giữa hai nhóm cạnh tranh, nhưng đủ để cả hai có thêm một ngày sống.',
+    choices: [
+      { text: 'Đổi đồ ăn lấy dụng cụ và phụ tùng', outcome: 'Hai bên trao đổi công bằng. Bạn nhận được vài món rất hữu ích.', stats: { stamina: -3 }, roll: [{ table: 'tools', n: 2 }, { table: 'autoparts', n: 1, chance: 0.6 }], lose: [{ name: 'Đồ hộp', quantity: 1 }], flags: ['rival_trade_done'] },
+      { text: 'Trao đổi thông tin: hỏi về các cứ điểm và đường đi an toàn', outcome: 'Họ kể về vài nơi còn nguyên đồ. Bạn ghi nhớ tất cả. Tin tức đôi khi quý hơn đồ ăn.', stats: { sanity: 3 }, flags: ['rival_trade_done'] },
+      { text: 'Từ chối, bạn không tin họ', outcome: 'Họ gật đầu lặng lẽ rồi rời đi. Có thể bạn vừa đóng một cánh cửa lẽ ra nên để mở.', stats: { sanity: -1 }, flags: ['rival_trade_done'], flagsRemove: ['rival_allied'] },
+    ],
+  },
+  // ---------- Chung cư: quét từng tầng, từng căn, chiếm cả tòa nhà ----------
+  {
+    id: 'r_floor_sweep', zones: ['near'], primary: 'near', weight: 4, only: ['apartment_survivors'],
+    when: (c) => !c.flags.includes('building_secured'),
+    situation: (c) => {
+      const cleared = c.flags.filter((f) => /^floor_\d$/.test(f)).length;
+      const floorNo = Math.max(1, 6 - cleared);
+      return 'Bạn đứng ở chiếu nghỉ tầng ' + floorNo + '. Mỗi tầng có sáu căn hộ: cửa đóng, cửa mở toang, vệt máu dưới khe cửa. Muốn biến cả tòa nhà thành lãnh thổ của mình, bạn phải quét từng tầng một, từng căn một, theo thứ tự từ trên xuống. (Đã quét ' + cleared + '/5 tầng phía dưới.)';
+    },
+    choices: [
+      { text: 'Gõ cửa từng căn, thương lượng với người còn sống và lục những nhà đã bỏ trống', outcome: 'Bạn đi từng cửa. Có nhà trống, có nhà chỉ còn một cụ già run rẩy đồng ý nhường lại chỗ trú. Chầm chậm, tầng này đã thuộc về bạn.', stats: { stamina: -9, sanity: 2 }, roll: [{ table: 'household', n: 2 }, { table: 'domestic', n: 1, chance: 0.7 }], dynFlags: 'floor' },
+      { text: 'Phá cửa, dọn sạch từng căn trống và tịch thu mọi thứ dùng được', outcome: 'Bạn phá hết những cánh cửa khóa, vét từng ngăn kéo. Tiếng ồn khiến vài bóng đen lao ra từ phòng cuối hành lang. Tầng này giờ sạch bóng, nhưng bạn bị thương.', stats: { hp: -6, stamina: -12, sanity: -3 }, roll: [{ table: 'household', n: 3 }, { table: 'tools', n: 1, chance: 0.6 }, { table: 'clothing', n: 1, chance: 0.4 }], dynFlags: 'floor' },
+      { text: 'Chặn hai đầu cầu thang tầng này, rồi quét từ từ trong im lặng', outcome: 'Bạn dựng chướng ngại ở hai đầu cầu thang rồi quét từng căn trong im lặng. Chậm nhưng an toàn. Tầng này có thể trở thành vùng đệm của bạn.', stats: { stamina: -13, sanity: 3 }, roll: [{ table: 'hardware', n: 1 }, { table: 'household', n: 1 }], dynFlags: 'floor' },
+    ],
+  },
+  {
+    id: 'r_building_secured', zones: ['near', 'shelter'], primary: 'near', weight: 5, only: ['apartment_survivors'],
+    when: (c) => c.flags.includes('building_secured') && !c.flags.includes('building_owned'),
+    situation: () => 'Từ sáu tầng đến tầng trệt, mọi cửa đều đã được kiểm tra, mọi căn đều đã được dọn. Tiếng bước chân của chính bạn vang lên trong tòa nhà vắng lặng: giờ đây cả tòa chung cư thuộc về bạn, là một pháo đài thẳng đứng với nhiều lớp phòng thủ.',
+    choices: [
+      { text: 'Tập trung đồ đạc từ mọi tầng về một kho chung ở tầng thượng', outcome: 'Bạn mất cả ngày kéo đồ từ các căn lên kho. Giờ bạn có một nơi chứa đồ thực sự.', stats: { stamina: -12, sanity: 5 }, roll: [{ table: 'household', n: 3 }, { table: 'warehouse', n: 2 }], flags: ['building_owned'] },
+      { text: 'Gia cố cầu thang và cổng thoát hiểm để biến tòa nhà thành pháo đài', outcome: 'Bạn hàn kín những lối không cần thiết và chỉ để lại một lối ra vào bí mật. Giờ muốn vào, bầy zombie phải xô qua nhiều lớp cửa.', stats: { stamina: -14, sanity: 4 }, roll: [{ table: 'hardware', n: 2 }], flags: ['building_owned'] },
+      { text: 'Mời những người sống sót còn lại trong tòa về ở cùng, lập quy tắc chung', outcome: 'Bạn tập hợp những người còn sống, đặt ra luật chung: chia ca canh gác, chia phần ăn. Một cộng đồng nhỏ ra đời trong tòa nhà đổ nát.', stats: { sanity: 8, stamina: -6 }, flags: ['building_owned'] },
+    ],
+  },
+  // ---------- Trạm y tế: bị cô lập, khó khăn hơn ----------
+  {
+    id: 'r_clinic_gate', zones: ['near'], primary: 'near', weight: 5, only: ['clinic_containment'],
+    when: (c) => !c.flags.includes('clinic_breach'),
+    situation: () => 'Ở {near}, cổng phụ của trạm bị chặn kín bằng rào cách ly, xích sắt và một chiếc xe cứu thương lật nghiêng. Ngoài kia là thế giới, nhưng bạn đang bị nhốt trong chính nơi cứu mạng mình. Không phá được cổng, bạn không thể đi đâu cả.',
+    choices: [
+      { text: 'Dùng xà beng hoặc kìm cắt xích, bẩy rào chắn ra', outcome: 'Bạn dồn cả sức vào xà beng. Tiếng kim loại rít lên ghê tai, nhưng cuối cùng chiếc xích đứt. Cổng mở ra một khe vừa đủ một người.', stats: { stamina: -15, sanity: 2 }, requires: [{ re: /xà beng|kìm|rìu|búa|cuốc/i, label: 'Dụng cụ phá xích (xà beng/kìm/rìu)' }], flags: ['clinic_breach'] },
+      { text: 'Từ từ tháo từng mối nối bằng tay trong nhiều giờ', outcome: 'Không dụng cụ, bạn dùng đinh và mảnh sắt gỡ từng mắt xích. Mất cả buổi chiều, tay rớm máu, nhưng cổng cuối cùng cũng mở.', stats: { stamina: -20, sanity: -3, hp: -2 }, flags: ['clinic_breach'] },
+      { text: 'Ở lại, chờ có người cứu hoặc tìm cách khác', outcome: 'Bạn dựa vào tường, nhìn qua song sắt ra con đường vắng. Không ai tới. Một ngày trôi qua trong im lặng.', stats: { sanity: -5 } },
+    ],
+  },
+  {
+    id: 'r_clinic_ward', zones: ['near'], primary: 'near', weight: 2, only: ['clinic_containment'],
+    situation: () => 'Dãy phòng cách ly ở {near} vẫn còn nguyên tấm nhựa che. Tiếng thở khò khè phát ra từ sau tấm nhựa. Có thể là bệnh nhân còn sống, hoặc đã biến đổi. Trong phòng có tủ thuốc nhưng mùi bệnh nồng nặc.',
+    choices: [
+      { text: 'Che kín mặt, mở từng phòng kiểm tra và lấy thuốc', outcome: 'Bạn mở từng phòng. Phần lớn đã chết hoặc biến đổi, chỉ một phòng vẫn còn tiếng thở yếu ớt, bạn không dám bước vào. Bạn lục tủ thuốc rồi nhanh chóng rút ra.', stats: { stamina: -8, sanity: -6, infection: 4 }, roll: [{ table: 'pharmacy', n: 3 }] },
+      { text: 'Nói chuyện qua tấm nhựa với người còn tỉnh', outcome: 'Một giọng yếu ớt kể về những ngày đầu: bác sĩ chạy trốn, bệnh nhân bị bỏ lại. Người đó xin nước. Bạn đưa qua khe nhựa. Một lúc sau tiếng thở ngưng hẳn.', stats: { sanity: -8, thirst: 3 } },
+      { text: 'Đóng chặt cửa dãy phòng, không đụng vào thứ gì ở đó', outcome: 'Bạn khóa dãy phòng lại bằng xích sắt. Những thứ quý giá bên trong vẫn nằm đó, nhưng bạn giữ được mạng.', stats: { sanity: 1 } },
+    ],
+  },
+  {
+    id: 'r_clinic_generator', zones: ['near', 'shelter'], primary: 'near', weight: 2, only: ['clinic_containment'],
+    when: (c) => c.day >= 3,
+    situation: () => 'Dưới tầng hầm trạm y tế có một máy phát điện dự phòng. Công tắc nằm cuối dãy hành lang tối, có vệt máu dẫn xuống đó. Nếu chạy được, trạm sẽ có điện cho tủ thuốc và đèn.',
+    choices: [
+      { text: 'Xuống tầng hầm khởi động máy, chấp nhận tiếng ồn', outcome: 'Tiếng máy gầm gừ rồi ổn định, đèn trong trạm sáng lên. Cả trạm sống lại trong vài giờ trước khi bạn kịp tắt đi.', stats: { stamina: -10, sanity: 4 }, roll: [{ table: 'tools', n: 1 }, { table: 'electronics', n: 1 }] },
+      { text: 'Chỉ lấy nhiên liệu và linh kiện trong hầm, không khởi động', outcome: 'Bạn rút gọn: lấy những thứ có thể dùng rồi lên ngay. Thận trọng và ít tiếng động.', stats: { stamina: -6 }, roll: [{ table: 'tools', n: 2 }, { table: 'autoparts', n: 1, chance: 0.5 }] },
+      { text: 'Bỏ qua, quá nguy hiểm khi một mình xuống hầm', outcome: 'Bạn nhìn xuống bậc cầu thang tối, rồi quay đi.', stats: { sanity: 1 } },
+    ],
+  },
+  // ---------- Nhà riêng: trèo qua từng nhà hàng xóm ----------
+  {
+    id: 'r_neighbor_house', zones: ['near', 'roof'], primary: 'near', weight: 4, only: ['private_house'],
+    situation: (c) => {
+      const looted = c.flags.filter((f) => /^house_\d$/.test(f)).length;
+      return 'Từ ' + (c.zone === 'roof' ? 'mái tum' : 'hàng rào') + ', bạn nhìn sang {neighbor}. Nhà thứ ' + (looted + 1) + ' trong dãy: cửa sổ tầng hai còn nguyên, ban công có phơi quần áo từ ngày trước tận thế. Đã ' + looted + ' nhà được lục soát.';
+    },
+    choices: [
+      { text: 'Trèo qua mái hoặc ban công, vào nhà bằng cửa sổ tầng trên', outcome: 'Bạn trèo qua khoảng trống giữa hai mái nhà, hạ người xuống ban công và lách vào qua cửa sổ. Nhà im lìm, mùi ẩm mốc. Bạn lục thật nhanh và rút ra theo đường cũ.', stats: { stamina: -9, sanity: -2 }, roll: [{ table: 'household', n: 2 }, { table: 'domestic', n: 1, chance: 0.7 }], dynFlags: 'floor' },
+      { text: 'Gõ cửa trước, xem trong nhà có người còn sống không', outcome: 'Tiếng gõ vang lên rất rõ. Một lúc lâu sau, từ khe cửa lộ ra ánh mắt dè chừng: một người lớn tuổi đồng ý đổi vài món đồ lấy tin tức của bạn.', stats: { stamina: -3, sanity: 2 }, roll: [{ table: 'household', n: 2 }], dynFlags: 'floor' },
+      { text: 'Phá cổng chính, vào dọn sạch phòng khách và bếp', outcome: 'Cánh cổng đổ ầm xuống sân. Bạn vào nhanh, vơ hết những gì thấy trước khi hàng xóm phía sau nghe thấy.', stats: { hp: -4, stamina: -10, sanity: -3 }, roll: [{ table: 'household', n: 3 }, { table: 'tools', n: 1, chance: 0.5 }], dynFlags: 'floor' },
+    ],
+  },
+];
+
 export const ROUTINE_SCENES: RoutineScene[] = [
+  ...STORY_SCENES,
   // ============ CHỖ TRÚ ============
   {
     id: 'r_inventory_check', zones: ['shelter'], primary: 'shelter',
@@ -306,7 +449,7 @@ export const ROUTINE_SCENES: RoutineScene[] = [
     situation: () => 'Một chiếc xe nằm chổng ngược ở {outside}, kính vỡ nát, mùi xăng nồng nặc. Thi thể nằm gục sau tay lái đã khô quắt. Trong cốp có thể còn chút gì hữu ích, nhưng mùi xăng sẽ thu hút những kẻ nhạy mùi.',
     choices: [
       { text: 'Rút xăng từ bình nhiên liệu bằng ống nhựa vào can', outcome: 'Bạn ngậm ống nhựa hút mồi, cố không nuốt phải. Xăng chảy chậm vào can, nhưng cuối cùng bạn có được thứ nhiên liệu quý.', stats: { stamina: -9, sanity: -2 }, gain: [{ id: 'sc_gasoline', name: 'Can xăng mini 5 lít', category: 'material', quantity: 1, description: 'Xăng đặc chế tạo chai cháy hoặc chạy máy phát.', rarity: 'rare' }] },
-      { text: 'Cạy cốp xe, lục tìm đồ dùng cá nhân của chủ xe', outcome: 'Cốp xe bật tung với tiếng rít. Bạn lục tìm kỹ và vơ hết những thứ còn dùng được, rồi rời đi.', stats: { stamina: -7, sanity: -3 }, roll: { table: 'vehicle', n: 3 } },
+      { text: 'Cạy cốp xe, lục tìm đồ dùng cá nhân của chủ xe', outcome: 'Cốp xe bật tung với tiếng rít. Bạn lục tìm kỹ và vơ hết những thứ còn dùng được, rồi rời đi.', stats: { stamina: -7, sanity: -3 }, roll: [{ table: 'vehicle', n: 2 }, { table: 'autoparts', n: 1, chance: 0.7 }] },
       { text: 'Đi vòng qua, không đụng vào xe vì mùi xăng quá nồng', outcome: 'Bạn đi vòng hẳn sang bên kia, giữ khoảng cách. Thận trọng, nhưng bỏ lỡ cơ hội.', stats: { sanity: 1 } },
     ],
   },
@@ -354,7 +497,7 @@ export const ROUTINE_SCENES: RoutineScene[] = [
     situation: () => 'Một tiệm kim khí nhỏ ở {outside} với cánh cửa sắt kéo hé. Bên trong ngổn ngang ốc vít, dây thừng, đồ nghề rỉ sét. Những thứ này không ăn được nhưng có thể cứu mạng khi gia cố chỗ trú.',
     choices: [
       { text: 'Gom nhanh những thứ nhỏ gọn, dễ mang rồi đi', outcome: 'Bạn nhét vào ba lô những món dễ mang và rời đi trong vài phút.', stats: { stamina: -5 }, roll: { table: 'hardware', n: 2 } },
-      { text: 'Lục kỹ cả kho, tìm dụng cụ nặng và nhiên liệu', outcome: 'Bạn lục từng kệ, kéo những thùng nặng ra. Tốn sức và ồn, nhưng cái bạn mang về xứng đáng.', stats: { stamina: -12, sanity: -2 }, roll: [{ table: 'hardware', n: 3 }, { table: 'weapons', n: 1, chance: 0.6 }, { table: 'tools', n: 1, chance: 0.5 }] },
+      { text: 'Lục kỹ cả kho, tìm dụng cụ nặng và nhiên liệu', outcome: 'Bạn lục từng kệ, kéo những thùng nặng ra. Tốn sức và ồn, nhưng cái bạn mang về xứng đáng.', stats: { stamina: -12, sanity: -2 }, roll: [{ table: 'hardware', n: 3 }, { table: 'weapons', n: 1, chance: 0.6 }, { table: 'autoparts', n: 1, chance: 0.5 }] },
       { text: 'Thử mở két sắt nhỏ ở góc quầy', outcome: 'Bạn mò mẫm với một thanh sắt, két mở ra sau nhiều lần cạy. Bên trong chỉ có giấy tờ và vài đồng xu, nhưng bạn cũng tìm thấy một thứ hữu ích bị cất kỹ.', stats: { stamina: -8, sanity: -1 }, roll: { table: 'hardware', n: 1 } },
     ],
   },

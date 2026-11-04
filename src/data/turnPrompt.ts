@@ -31,7 +31,7 @@ export function buildTurnPrompt(i: TurnPromptInput): string {
 NGÔN NGỮ: BẮT BUỘC 100% TIẾNG VIỆT TRƠN TRU, RÕ RÀNG. Không mô tả chớp nháy, giật lag.
 
 # 1. NGUỒN SỰ THẬT
-- "global_state" là nguồn sự thật duy nhất về chỉ số, balo, cột mốc. Tuyệt đối không bịa vật phẩm hoặc sự kiện mâu thuẫn với nó.
+- "global_state" là nguồn sự thật duy nhất về chỉ số, balo, cột mốc. Trường "world_summary" là bản tóm tắt dài hạn của cả thế giới (nhân vật, vật tư, địa điểm, bí ẩn, nhiệm vụ dang dở, phe phái, hệ quả): tuyệt đối không mâu thuẫn với nó. Tuyệt đối không bịa vật phẩm hoặc sự kiện mâu thuẫn với nó.
 - Bạn KHÔNG quyết định cảnh kế tiếp: hệ thống đã chọn sẵn cảnh (xem "CẢNH KẾ TIẾP") và bộ 3 lựa chọn. Bạn chỉ VIẾT LẠI phần tả cảnh cho sinh động, giữ nguyên sự kiện, địa điểm, nhân vật và mối đe dọa của cảnh đó, KHÔNG thêm biến cố mới (không tự nhảy sang băng cướp, bầy zombie, v.v. nếu cảnh không có).
 - Phần dẫn nhập đã có sẵn trong cảnh: hãy giữ mạch chuyển cảnh mượt, hợp lý với hành động vừa rồi.
 

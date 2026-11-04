@@ -261,6 +261,7 @@ export const SceneIllustration: React.FC<Props> = ({ sceneId = 'r_start', weathe
       className="block h-36 w-full rounded-lg border border-neutral-800 sm:h-48"
       role="img"
       aria-label="Minh họa cảnh hiện tại"
+      style={{ filter: 'sepia(0.32) saturate(0.8) contrast(1.06)' }}
       preserveAspectRatio="xMidYMid slice"
     >
       <defs>
