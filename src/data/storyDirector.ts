@@ -6,7 +6,7 @@ import { fill, getSetting, locationText, moveText, Setting, Zone } from './setti
 import { LootTableId, rollLoot } from './lootTables';
 import { parseStrangerId, resolveStranger, rollStranger, strangerScene, strangerZones, StrangerSpec } from './strangers';
 import { buildRadioTransmission, RadioIntel } from './radio';
-import { composeEnding } from './storyArc';
+import { composeEnding, EndingInput } from './storyArc';
 import { resolveRaid, raidTypeFor, raidDayOf, exposureOf, RaidType } from './raid';
 import { decodeMapAction, getNodeAny, REGION_LABEL } from './worldMap';
 import { VEHICLES, ROAD_EVENTS, SAFE_ROAD_LINES, fuelNeededRoundTrip, VehicleKind } from './vehicles';
@@ -235,7 +235,34 @@ const MS_EFFECTS: Record<string, MsEffect> = {
     tag: 'ending_wasteland_warlord', ending: 'Cánh quạt trực thăng bốc cháy dưới hỏa lực của bạn, quân đội mất tín hiệu và biến mất khỏi thành phố. Bạn và những người trung thành quay về căn cứ ngầm, dựng nên pháo đài giữa vùng đất chết. Kết cục: BÁ CHỦ HOANG TÀN.',
     outcome: 'Bạn từ chối di tản, kích nổ trực thăng của quân đội và giữ lại căn cứ ngầm cho riêng mình.', stats: { stamina: -20, sanity: -10 },
   },
+  m5_broadcast_truth: {
+    tag: 'ending_voice_in_storm', ending: 'Bạn chiếm đài phát sóng trên tháp và đọc cho cả thành phố nghe điều bạn đã ghép được. Không ai biết bao nhiêu người nghe thấy. Kết cục: TIẾNG NÓI TRONG BÃO.',
+    outcome: 'Bạn chiếm đài phát sóng trên nóc tháp, mở máy và bắt đầu nói.', stats: { hp: -8, stamina: -25, sanity: 6 },
+  },
+  m5_bunker_refuge: {
+    tag: 'ending_last_home', ending: 'Bạn bỏ lại trực thăng. Cả nhóm chui qua đường hầm cũ, theo tín hiệu mà bạn từng cứu. Kết cục: MÁI NHÀ CUỐI CÙNG.',
+    outcome: 'Bạn bỏ chuyến bay, dẫn cả nhóm xuyên đường hầm tối về phía Bunker 13.', stats: { stamina: -22, sanity: 8 },
+  },
+  m5_hold_the_street: {
+    tag: 'ending_street_keeper', ending: 'Bạn ở lại cùng Đội Cây Cầu, chặn lối vào phố bằng chính xe cộ đổ nát. Kết cục: NGƯỜI GÁC PHỐ.',
+    outcome: 'Bạn từ chối lên máy bay, cùng Đội Cây Cầu chặn đầu phố trước đợt xác sống cuối cùng.', stats: { hp: -12, stamina: -28 },
+  },
 };
+
+type MajorChoice = (typeof STORY_MILESTONES)[number]['majorChoices'][number];
+// Các kết cục chỉ mở khi người chơi đã làm đủ việc: manh mối, đồng minh, quan hệ với phe khác.
+const EXTRA_ENDINGS: { choice: MajorChoice; when: (flags: string[]) => boolean }[] = [
+  { when: (f) => f.filter((x) => /^clue_\d$/.test(x)).length >= 5, choice: { id: 'm5_broadcast_truth', label: 'Chiếm đài phát sóng trên tháp và đọc cho cả thành phố nghe sự thật bạn đã ghép được', shortDescription: 'Dùng giây phút cuối để nói ra điều bị giấu.', consequenceTag: 'ending_voice_in_storm', worldImpact: 'Kết Cục: "TIẾNG NÓI TRONG BÃO"', karmaChange: 25 } },
+  { when: (f) => f.includes('bunker13_heroes') || f.includes('bunker13_diverted_horde'), choice: { id: 'm5_bunker_refuge', label: 'Bỏ trực thăng, dẫn cả nhóm chui đường hầm về Bunker 13 mà bạn từng cứu', shortDescription: 'Về nơi có người nợ bạn một mái nhà.', consequenceTag: 'ending_last_home', worldImpact: 'Kết Cục: "MÁI NHÀ CUỐI CÙNG"', karmaChange: 20 } },
+  { when: (f) => f.includes('rival_allied'), choice: { id: 'm5_hold_the_street', label: 'Ở lại cùng Đội Cây Cầu chặn đầu phố, biến khu phố thành thành trì', shortDescription: 'Giữ lời hứa với những người đã tin bạn.', consequenceTag: 'ending_street_keeper', worldImpact: 'Kết Cục: "NGƯỜI GÁC PHỐ"', karmaChange: 20 } },
+];
+
+// Ba lựa chọn cuối cùng thay đổi theo những gì người chơi đã làm: càng nhiều mối quan hệ, càng nhiều lối thoát.
+function finalChoices(ms: (typeof STORY_MILESTONES)[number], flags: string[]): MajorChoice[] {
+  const [helo, stand, waste] = ms.majorChoices;
+  const extras = EXTRA_ENDINGS.filter((e) => e.when(flags)).map((e) => e.choice);
+  return [helo, ...extras, stand, waste].slice(0, 3);
+}
 
 const MS_LEAD_IN: Record<string, string> = {
   milestone_1_hospital: 'Trong lúc tìm kiếm vật tư y tế, bạn buộc phải đi vào khu bệnh viện cũ.',
@@ -443,7 +470,7 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
   // Cột mốc
   const ms = milestoneById(sceneId);
   if (ms) {
-    const mc = ms.majorChoices.find((c) => c.label === action);
+    const mc = (ms.id === 'milestone_5_final_evacuation' ? [...ms.majorChoices, ...EXTRA_ENDINGS.map((e) => e.choice)] : ms.majorChoices).find((c) => c.label === action);
     const fx = mc && MS_EFFECTS[mc.id];
     if (mc && fx) {
       const r = blankRes('milestone', fx.outcome);
@@ -469,7 +496,7 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
       }
       r.flags = [fx.tag];
       if (fx.ending) {
-        const choice = mc.id === 'm5_board_helo_with_cure' ? 'helo' : mc.id === 'm5_heroic_last_stand' ? 'last_stand' : 'wasteland';
+        const choice = ({ m5_board_helo_with_cure: 'helo', m5_heroic_last_stand: 'last_stand', m5_broadcast_truth: 'broadcast', m5_bunker_refuge: 'bunker', m5_hold_the_street: 'street' } as Record<string, EndingInput['choice']>)[mc.id] || 'wasteland';
         const epilogue = composeEnding({ choice, flags: req.flags || [], companions: comps, base: req.base || {} });
         r.ending = { is_game_over: false, is_victory: true, epilogue };
       }
@@ -905,13 +932,14 @@ function eventScene(ev: RandomEvent, inv: any[], leadIn: string, zone: Zone, set
   };
 }
 
-function milestoneScene(id: string, zone: Zone, setting: Setting, lock = false): NextScene {
+function milestoneScene(id: string, zone: Zone, setting: Setting, lock = false, flags: string[] = []): NextScene {
   const m = milestoneById(id)!;
+  const options = id === 'milestone_5_final_evacuation' ? finalChoices(m, flags) : m.majorChoices;
   const t = transition(id, zone, setting, lock);
   return {
     id, kind: 'milestone', zone: t.zone,
     situation: `${m.title}\n\n${t.lead ? t.lead + ' ' : ''}${MS_LEAD_IN[id] || ''} ${m.description}\n\n${m.contextPrompt}`,
-    choices: m.majorChoices.map((c) => c.label) as [string, string, string],
+    choices: options.map((c) => c.label) as [string, string, string],
     isEmergency: false, dangerLevel: 4, soundCue: 'heartbeat',
   };
 }
@@ -1027,7 +1055,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
       const m = STORY_MILESTONES[i];
       if (done.includes(m.id)) continue;
       if (m.id === 'milestone_4_mutation_crisis' && comps.length === 0) continue;
-      if (!MS_VIA_PENDING.has(m.id) && nextDay >= MS_MIN_DAY[i]) next = milestoneScene(m.id, zone, setting, lockOutside);
+      if (!MS_VIA_PENDING.has(m.id) && nextDay >= MS_MIN_DAY[i]) next = milestoneScene(m.id, zone, setting, lockOutside, req.flags || []);
       break;
     }
     // 2) Sự kiện đã lên lịch đến hạn.
@@ -1035,7 +1063,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
       const due = pending.find((p) => p.dueDay <= nextDay);
       if (due) {
         consumedPending = due.id;
-        next = due.id.startsWith('milestone_') ? milestoneScene(due.id, zone, setting, lockOutside) : eventScene(eventById(due.id)!, inv, LEAD_IN[due.id] || '', zone, setting, lockOutside);
+        next = due.id.startsWith('milestone_') ? milestoneScene(due.id, zone, setting, lockOutside, req.flags || []) : eventScene(eventById(due.id)!, inv, LEAD_IN[due.id] || '', zone, setting, lockOutside);
       }
     }
     // 3) Bão do dự báo ứng nghiệm.

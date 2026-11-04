@@ -107,7 +107,7 @@ export function factionStanding(flags: string[]): FactionState[] {
 }
 
 export interface EndingInput {
-  choice: 'helo' | 'last_stand' | 'wasteland';
+  choice: 'helo' | 'last_stand' | 'wasteland' | 'broadcast' | 'bunker' | 'street';
   flags: string[];
   companions: { name: string; realName?: string; nameKnown?: boolean; status?: string; trust?: number; affection?: number; intimacyLevel?: string }[];
   base: { hasBase?: boolean; fortification?: number; name?: string };
@@ -126,6 +126,9 @@ export function composeEnding(e: EndingInput): string {
   if (e.choice === 'helo') lines.push('Bạn mở đường máu lên nóc tháp, kích nổ thang máy chặn bầy quái vật và bước lên chiếc trực thăng cuối cùng.');
   if (e.choice === 'last_stand') lines.push('Bạn ở lại tử thủ chân tháp để những người còn lại kịp bay đi, bắn cho đến viên đạn cuối cùng.');
   if (e.choice === 'wasteland') lines.push('Bạn từ chối di tản, phá hủy chiếc trực thăng và giữ lại căn cứ cho riêng mình.');
+  if (e.choice === 'broadcast') lines.push('Bạn chiếm đài phát sóng trên tháp. Giữa tiếng rè của sóng, bạn đọc từng manh mối bạn đã nhặt nhạnh suốt những ngày qua: tín hiệu quân đội, nhóm Mầm Xanh, lệnh phong tỏa. Bầy zombie đã tới cầu thang, nhưng giọng bạn vẫn bay đi khắp thành phố.');
+  if (e.choice === 'bunker') lines.push(has('bunker13_heroes') || has('bunker13_diverted_horde') ? 'Bạn bỏ lại chiếc trực thăng, dẫn mọi người chui qua đường hầm cũ. Ở đầu kia, cánh cổng Bunker 13 mở ra trước khi bạn kịp gõ.' : 'Bạn dẫn mọi người chui đường hầm tới Bunker 13.');
+  if (e.choice === 'street') lines.push('Bạn từ chối lên máy bay. Cùng Đội Cây Cầu, bạn dựng chướng ngại bằng xe cộ đổ nát chặn đầu phố, và đứng cạnh họ khi đợt xác sống cuối cùng ập tới.');
 
   // Nhóm
   if (alive.length) lines.push(`Bên bạn còn lại ${alive.length} người: ${alive.map(nm).join(', ')}.`);
@@ -135,7 +138,11 @@ export function composeEnding(e: EndingInput): string {
   if (lover) lines.push(`${nm(lover)} nắm chặt tay bạn: dù ngày mai ra sao, hai người sẽ cùng đối mặt.`);
 
   // Căn cứ
-  if (e.choice === 'wasteland') {
+  if (e.choice === 'street') {
+    lines.push(fort >= 50 ? 'Căn cứ của bạn thành điểm tựa phía sau chiến tuyến, nơi người bị thương được đưa vào và vũ khí được chia.' : 'Không có căn cứ vững phía sau, chiến tuyến chỉ còn dựa vào lòng can đảm của từng người.');
+  } else if (e.choice === 'bunker') {
+    lines.push(e.base.hasBase ? `${e.base.name || 'Căn cứ'} khép lại sau lưng. Bạn không ngoảnh lại.` : 'Bạn đến Bunker 13 gần như tay trắng, nhưng không bị hỏi một câu.');
+  } else if (e.choice === 'wasteland') {
     lines.push(e.base.hasBase && fort >= 60 ? `${e.base.name || 'Căn cứ'} đủ vững để thành pháo đài đầu tiên của một vùng đất mới.` : 'Căn cứ còn quá mỏng manh: sau vài tháng bầy zombie và kẻ cướp sẽ tìm tới.');
   } else {
     lines.push(e.base.hasBase ? `${e.base.name || 'Căn cứ'} bị bỏ lại phía sau, ${fort >= 60 ? 'vững vàng đến phút cuối như một đài tưởng niệm lặng lẽ' : 'sụp xuống dưới sức nặng của bầy đàn ngay đêm đó'}.` : 'Bạn chẳng còn gì để bỏ lại ngoài những ký ức.');
@@ -158,6 +165,9 @@ export function composeEnding(e: EndingInput): string {
   if (clues >= 5) {
     if (e.choice === 'helo') lines.push('Bạn biết điều mà ít ai biết: sau đợt sơ tán, cả thành phố sẽ bị ném bom. Bạn nói điều đó với mọi người trên máy bay, và họ cũng bàng hoàng.');
     else if (e.choice === 'last_stand') lines.push('Bạn đã biết cả thành phố sắp bị phong tỏa, và bạn cố giữ chân bầy zombie đủ lâu để những người trên máy bay kịp tới nơi an toàn, mang theo sự thật.');
+    else if (e.choice === 'broadcast') lines.push('Những ai nghe được đã kịp chui xuống hầm trước đợt phong tỏa. Bạn không biết bao nhiêu người, nhưng sự thật đã không còn nằm trong tay kẻ che giấu nó.');
+    else if (e.choice === 'bunker') lines.push('Bạn kể cho Bunker 13 về lệnh phong tỏa. Họ đào sâu thêm, và mưa bom đi qua phía trên đầu như một cơn sấm xa.');
+    else if (e.choice === 'street') lines.push('Bạn báo cho cả phố biết về đợt phong tỏa, và họ rút xuống các tầng hầm cùng bạn. Phố không còn, nhưng người thì còn.');
     else lines.push('Bạn biết thành phố sẽ bị ném bom, nên đã chuyển nhóm vào hầm sâu trước khi đợt phong tỏa tới. Một mình bạn sống sót qua mưa bom, và đó là lý do bạn dám ở lại.');
   } else if (clues >= 3) lines.push('Bạn nghi ngờ có điều gì đó lớn hơn dịch bệnh đứng sau tất cả, nhưng chưa đủ mảnh ghép để biết.');
   else lines.push('Bạn chưa bao giờ biết vì sao thảm họa xảy ra. Có lẽ đó không còn là điều quan trọng nữa.');
