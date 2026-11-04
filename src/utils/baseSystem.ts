@@ -267,3 +267,26 @@ export const SHELTER_SUITABILITY: Record<string, { score: number; pros: string[]
   private_house: { score: 66, kind: 'Civilian Shelter', pros: ['Là nhà của bạn, biết rõ từng ngóc ngách', 'Có sân nhỏ để trồng rau và hứng nước', 'Trèo qua các nhà hàng xóm để loot dần'], cons: ['Tường rào mỏng, cửa sắt cũ', 'Nhiều nhà liền kề, tiếng động lan nhanh'] },
   clinic_containment: { score: 58, kind: 'Civilian Shelter', pros: ['Có sẵn thuốc và giường', 'Mái tôn hứng nước tốt'], cons: ['Nhiều xác nhiễm bệnh cần dọn'] },
 };
+
+export interface BaseDelta { fortification: number; moduleLoss: string[]; stolen: { name: string; quantity: number }[] }
+
+// Áp hậu quả một trận tấn công: mất kiên cố, hỏng công trình (giảm 1 cấp), bị cướp kho.
+export function applyBaseDelta(base: BaseCamp, d: BaseDelta): BaseCamp {
+  const modules = { ...(base.modules || {}) };
+  for (const id of d.moduleLoss) if (modules[id]) modules[id] = Math.max(0, modules[id] - 1);
+  const warehouse = base.warehouse.map((i) => ({ ...i }));
+  for (const s of d.stolen) {
+    let left = s.quantity;
+    for (const it of warehouse) {
+      if (left <= 0) break;
+      if (it.name === s.name) { const t = Math.min(it.quantity, left); it.quantity -= t; left -= t; }
+    }
+  }
+  return {
+    ...base,
+    modules,
+    warehouse: warehouse.filter((i) => i.quantity > 0),
+    fortification: Math.max(0, Math.min(100, base.fortification + d.fortification)),
+    facilities: { ...base.facilities, hasStove: (modules.stove || 0) > 0 || (base.facilities.hasStove && !d.moduleLoss.includes('stove')) },
+  };
+}

@@ -2,6 +2,7 @@ import { Item, WeatherType } from '../types/game';
 import { Setting, Zone } from './settings';
 import { LootTableId } from './lootTables';
 import { CLUES } from './storyArc';
+import { RAID_LABEL, RaidType, raidDayOf, raidTypeFor } from './raid';
 
 // ====================================================================
 // KHO CẢNH SINH TỒN THƯỜNG NGÀY, GẮN VỚI "VÙNG" (zone).
@@ -38,6 +39,8 @@ export function selectCompanions(comps: CompView[], who: TeamWho): CompView[] {
 
 export interface SceneCtx {
   comps: CompView[];
+  turn: number;
+  hasBase: boolean;
   day: number;
   weather: WeatherType;
   zone: Zone;
@@ -75,7 +78,8 @@ export interface RoutineChoice {
   roll?: Roll | Roll[];         // bốc loot ngẫu nhiên từ một hoặc nhiều bảng
   flags?: string[];             // hậu quả lâu dài của quyết định (ghi nhớ trong thế giới)
   flagsRemove?: string[];       // xóa các hậu quả đã được giải quyết
-  dynFlags?: 'floor';           // cờ động: tầng chung cư đã quét sạch
+  dynFlags?: 'floor' | 'raidType' | 'raidDay'; // cờ động: tầng đã quét, loại kẻ tấn công, ngày bị tấn công
+  raid?: 'hold' | 'sortie' | 'evacuate';        // xử lý trận tấn công căn cứ
   team?: TeamOp | TeamOp[];     // tác động lên đồng đội được chọn theo tiêu chí
   lose?: { name: string; quantity: number }[];
   go?: Zone;                    // đổi vùng (director chèn câu di chuyển)
@@ -376,7 +380,46 @@ const COMPANION_SCENES: RoutineScene[] = [
   },
 ];
 
+// ---------- Căn cứ bị tấn công: cảnh báo, chuẩn bị rồi đối đầu ----------
+const RAID_FLAGS_CLEAR = ['raid_warned', 'prep_traps', 'prep_hide', 'prep_guards', 'raid_type_zombie', 'raid_type_bandit', 'raid_type_rival', 'raid_type_wolves'];
+const raidTypeOf = (flags: string[], day: number): RaidType => (flags.find((f) => f.startsWith('raid_type_'))?.slice(10) as RaidType) || raidTypeFor(flags, day);
+
+const RAID_SCENES: RoutineScene[] = [
+  {
+    id: 'r_raid_warning', zones: ['shelter'], primary: 'shelter', weight: 6,
+    // Không chọn ngẫu nhiên như cảnh thường: director tung xúc xắc theo mức lộ diện của căn cứ (xem exposureOf)
+    when: () => false,
+    situation: (c) => {
+      const t = raidTypeFor(c.flags, c.day);
+      const sign: Record<RaidType, string> = {
+        zombie: 'Từ khi trời chạng vạng, tiếng rên đã dày hơn hẳn: cả khu phố như đang dịch chuyển dần về phía căn cứ. Tiếng ồn và mùi người có thể đã dẫn chúng tới đây.',
+        bandit: 'Trên con ngõ phía sau, bạn thấy mẩu thuốc lá còn ấm, vết bánh xe mới và tiếng người thì thầm xa xa. Có ai đó đang dò xét căn cứ của bạn.',
+        rival: 'Dấu giày quen thuộc ở ngay trước cửa, cùng một dấu phấn nguệch ngoạc: Đội Cây Cầu đã tìm ra chỗ bạn trú, và họ không đến để nói chuyện.',
+        wolves: 'Bạn nghe tiếng hú cổ họng văng vẳng từ phía cầu vượt, nhịp điệu mà bạn nhận ra ngay: Huyết Lang đang tập hợp, và lần này chúng nhắm thẳng vào bạn.',
+      };
+      return sign[t] + ' Bạn còn chút thời gian để chuẩn bị trước khi chúng đến. Bạn chỉ kịp chuẩn bị một việc, nên phải chọn cho đúng.';
+    },
+    choices: [
+      { text: 'Giăng bẫy dây, dựng chướng ngại quanh các lối vào', outcome: 'Bạn dựng cả đêm: dây căng ngang mắt cá, vỏ lon báo động, đinh rải sau cửa. Không chắc ngăn được hết, nhưng đủ làm chúng chậm lại.', stats: { stamina: -10, sanity: 1 }, flags: ['raid_warned', 'prep_traps'], dynFlags: 'raidType' },
+      { text: 'Giấu bớt vật tư quan trọng và chuẩn bị đường rút', outcome: 'Bạn chia đồ vào nhiều chỗ kín, giấu nửa số thức ăn sau tường giả và vạch sẵn đường thoát hiểm. Nếu chúng vào được, chúng sẽ không vơ trọn.', stats: { stamina: -7 }, flags: ['raid_warned', 'prep_hide'], dynFlags: 'raidType' },
+      { text: 'Phân người canh từng hướng, dồn vũ khí về điểm xung yếu', outcome: 'Bạn họp cả nhóm, chia ca canh và giao vị trí cho từng người. Ai cũng biết mình phải làm gì khi chúng tới.', stats: { stamina: -6, sanity: 2 }, flags: ['raid_warned', 'prep_guards'], dynFlags: 'raidType' },
+    ],
+  },
+  {
+    id: 'r_base_attack', zones: ['shelter'], primary: 'shelter', weight: 12,
+    when: (c) => c.hasBase && c.flags.includes('raid_warned'),
+    need: (c) => c.hasBase && c.flags.includes('raid_warned'),
+    situation: (c) => 'Nửa đêm, ' + RAID_LABEL[raidTypeOf(c.flags, c.day)] + ' đã tới. Tiếng đập cửa, tiếng ván rạn, tiếng thét dồn dập. Đến lúc kiểm chứng xem những gì bạn dựng nên có đủ vững hay không. Phải quyết định ngay: giữ phòng tuyến, xông ra phản công hay bỏ lại căn cứ để giữ mạng người.',
+    choices: [
+      { text: 'Giữ vững phòng tuyến, mỗi người một vị trí', outcome: '', raid: 'hold', stats: {}, flagsRemove: RAID_FLAGS_CLEAR, dynFlags: 'raidDay' },
+      { text: 'Xông ra phản công, đập tan đợt tấn công ngay trước cổng', outcome: '', raid: 'sortie', stats: {}, flagsRemove: RAID_FLAGS_CLEAR, dynFlags: 'raidDay' },
+      { text: 'Rút cả nhóm theo lối thoát, bỏ lại căn cứ cho chúng vơ vét', outcome: '', raid: 'evacuate', stats: {}, flagsRemove: RAID_FLAGS_CLEAR, dynFlags: 'raidDay' },
+    ],
+  },
+];
+
 export const ROUTINE_SCENES: RoutineScene[] = [
+  ...RAID_SCENES,
   ...COMPANION_SCENES,
   ...STORY_SCENES,
   // ============ CHỖ TRÚ ============

@@ -69,7 +69,8 @@ import type { RoleId } from './data/companionChat';
 import { SceneIllustration } from './components/SceneIllustration';
 import { encodeMapAction, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
 import { BaseHub } from './components/BaseHub';
-import { tickBase, payCost, MODULE_BY_ID, SHELTER_SUITABILITY } from './utils/baseSystem';
+import { tickBase, payCost, MODULE_BY_ID, SHELTER_SUITABILITY, applyBaseDelta } from './utils/baseSystem';
+import { exposureOf } from './data/raid';
 import { getSetting } from './data/settings';
 import { WorldSummaryModal } from './components/WorldSummaryModal';
 import { buildWorldSummary, eventsFromFlags, WorldEvent } from './data/worldState';
@@ -469,6 +470,7 @@ export default function App() {
           zone,
           awayTurns,
           flags: worldFlags,
+          hasVehicle: !!vehicle,
           worldSummary: makeSummary().text,
           seenBefore: loadSeen(),
           turnCount,
@@ -635,6 +637,7 @@ export default function App() {
       }
 
       let updatedBase = { ...bt.base, warehouse: updatedBaseWarehouse, fortification: Math.min(100, bt.base.fortification + team.fortification) };
+      if (data.base_delta) updatedBase = applyBaseDelta(updatedBase, data.base_delta);
       if (data.discoveredBase && !base.hasBase) {
         sound.playLoot();
         updatedBase = {
@@ -2085,6 +2088,7 @@ export default function App() {
           onEstablish={handleEstablishBase}
           onBuild={handleBuildModule}
           companions={companions}
+          exposure={exposureOf({ base, flags: worldFlags, day, companionCount: companions.filter((c) => c.status !== 'deceased').length, hasVehicle: !!vehicle })}
           vehicle={vehicle}
           onBuildVehicle={handleBuildVehicle}
           onRepairVehicle={handleRepairVehicle}

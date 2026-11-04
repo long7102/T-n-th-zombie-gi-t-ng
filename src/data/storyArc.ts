@@ -47,6 +47,9 @@ export const FLAG_TEXT: Record<string, string> = {
   rival_hostile: 'Có thù với nhóm Đội Cây Cầu',
   building_secured: 'Đã quét sạch và làm chủ cả tòa nhà',
   clinic_breach: 'Đã phá được cổng cách ly của trạm y tế',
+  raid_won: 'Đã đẩy lùi một cuộc tấn công vào căn cứ',
+  base_breached: 'Căn cứ từng bị đột nhập và cướp phá',
+  raid_evacuated: 'Đã bỏ căn cứ cho kẻ tấn công để giữ mạng người',
   pet_dog: 'Đã nhận nuôi một chú chó hoang',
   dog_refused: 'Đã xua con chó hoang đi',
   companion_betrayed: 'Một đồng đội đã phản bội và bỏ đi cùng đồ của nhóm',
@@ -144,6 +147,8 @@ export function composeEnding(e: EndingInput): string {
   if (has('bloodwolf_nemesis')) lines.push('Huyết Lang vẫn còn đó, và chúng chưa quên bạn.');
   if (has('rival_allied')) lines.push('Đội Cây Cầu ở lại giữ phố, đúng như lời hứa.');
   if (has('rival_hostile')) lines.push('Đội Cây Cầu đã chiếm phố sau lưng bạn.');
+  if (has('base_breached')) lines.push('Căn cứ từng bị đột nhập, và những vết cháy trên tường vẫn nhắc bạn đã suýt mất tất cả đêm đó.');
+  else if (has('raid_won')) lines.push('Căn cứ đã chịu được những cuộc tấn công, và người ta bắt đầu gọi nơi đó là pháo đài.');
   if (has('companion_sacrificed')) lines.push('Người đã hy sinh để bạn sống sót chưa một ngày nào rời khỏi suy nghĩ của bạn.');
   if (has('companion_betrayed')) lines.push('Người đã phản bội nhóm vẫn là một vết dao trong lòng bạn, dù bạn không rõ họ còn sống không.');
   if (has('pet_dog')) lines.push('Chú chó hoang năm nào vẫn ngoắc đuôi chạy sau bạn trên con đường mới.');

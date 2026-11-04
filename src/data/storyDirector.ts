@@ -7,6 +7,7 @@ import { LootTableId, rollLoot } from './lootTables';
 import { parseStrangerId, resolveStranger, rollStranger, strangerScene, strangerZones, StrangerSpec } from './strangers';
 import { buildRadioTransmission, RadioIntel } from './radio';
 import { composeEnding } from './storyArc';
+import { resolveRaid, raidTypeFor, raidDayOf, exposureOf, RaidType } from './raid';
 import { decodeMapAction, getNodeAny, REGION_LABEL } from './worldMap';
 import { VEHICLES, ROAD_EVENTS, SAFE_ROAD_LINES, fuelNeededRoundTrip, VehicleKind } from './vehicles';
 
@@ -36,6 +37,7 @@ export interface ChosenResolution {
   zone?: Zone;
   flags?: string[];
   flagsRemove?: string[];
+  baseDelta?: { fortification: number; moduleLoss: string[]; stolen: { name: string; quantity: number }[] };
   vehicleDelta?: { condition: number; fuel: number };
   deterministic: boolean;
 }
@@ -365,14 +367,14 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
   if (sceneId.startsWith('r_start')) {
     const n = parseInt(sceneId.split(':')[1] || '', 10);
     const ch = Number.isNaN(n) ? undefined : OPENING_SETS[n % OPENING_SETS.length].find((c) => fill(c.text, setting) === action);
-    if (ch) return fromRoutineChoice(ch, inv, comps, '', rng, setting, zone, req.flags || []);
+    if (ch) return fromRoutineChoice(ch, inv, comps, '', rng, setting, zone, req.flags || [], req);
   }
 
   // Cảnh thường
   const routine = ROUTINE_SCENES.find((s) => s.id === sceneId);
   if (routine) {
     const ch = routine.choices.find((c) => fill(c.text, setting) === action);
-    if (ch) return fromRoutineChoice(ch, inv, comps, sceneId, rng, setting, zone, req.flags || []);
+    if (ch) return fromRoutineChoice(ch, inv, comps, sceneId, rng, setting, zone, req.flags || [], req);
   }
 
   // Người lạ ngẫu nhiên
@@ -593,7 +595,7 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
   return r;
 }
 
-function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId: string, rng: Rng, setting: Setting, zone: Zone, flags: string[] = []): ChosenResolution {
+function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId: string, rng: Rng, setting: Setting, zone: Zone, flags: string[] = [], req: any = {}): ChosenResolution {
   const medic = sceneId === 'r_wound_care' ? comps.find((c) => /Uyên|Giang|y tá|dược sĩ|sinh viên y/i.test(`${realNameOf(c)} ${c.role || ''}`) && c.status !== 'deceased') : undefined;
   const miss = medic ? undefined : (ch.requires || []).find((q) => !hasItem(inv, q.re));
   if (miss) return failMissing('routine', miss.label);
@@ -606,6 +608,30 @@ function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId:
   for (const ro of rolls) if (rng() < (ro.chance ?? 1) * scarcity) r.gain.push(...rollLoot(ro.table, ro.n, rng));
   if (ch.flags) r.flags = [...ch.flags];
   if (ch.flagsRemove) r.flagsRemove = [...ch.flagsRemove];
+  // Cờ động cho hệ thống tấn công căn cứ
+  if (ch.dynFlags === 'raidType') r.flags = [...(r.flags || []), 'raid_type_' + raidTypeFor(flags, req.day || 1)];
+  if (ch.dynFlags === 'raidDay') r.flags = [...(r.flags || []), 'raid_day_' + (req.day || 1)];
+  if (ch.raid) {
+    const type = (flags.find((f) => f.startsWith('raid_type_'))?.slice(10) as RaidType) || raidTypeFor(flags, req.day || 1);
+    const res = resolveRaid(ch.raid, type, {
+      base: req.base || {},
+      companions: comps.map((c: any) => ({ name: c.name, hp: c.hp ?? 100, status: c.status, assignment: c.assignment, traits: c.traits, role: c.role, skills: c.skills })),
+      inventory: inv,
+      weaponDamage: req.player?.equippedWeapon?.damage || 0,
+      flags, day: req.day || 1,
+    }, rng);
+    r.outcome = res.outcome;
+    r.stats = { ...r.stats, ...res.stats };
+    r.gain.push(...res.gain);
+    r.companionUpdates.push(...res.companionUpdates);
+    r.baseDelta = res.baseDelta;
+    r.flags = [...(r.flags || []), ...res.flags];
+    if (res.gain.length) r.outcome += ' Bạn thu được: ' + res.gain.map((g) => g.name + ' x' + g.quantity).join(', ') + '.';
+    if (res.baseDelta.stolen.length) r.outcome += ' Bị cướp mất: ' + res.baseDelta.stolen.map((s) => s.name + ' x' + s.quantity).join(', ') + '.';
+    if (res.baseDelta.moduleLoss.length) r.outcome += ' Công trình bị hư hại: ' + res.baseDelta.moduleLoss.join(', ') + ' (giảm 1 cấp).';
+    r.deterministic = true;
+    return r;
+  }
   // Cờ động: quét tầng chung cư / lục nhà hàng xóm theo thứ tự thực tế
   if (ch.dynFlags === 'floor') {
     const isHouse = setting.id === 'private_house';
@@ -819,6 +845,8 @@ function buildCtx(req: any, nextDay: number, weather: WeatherType, zone: Zone, s
   const baseType = req.base?.base_type || (loc.toLowerCase().includes('quân sự') ? 'Military Base' : 'Apartment');
   const inv: any[] = req.player?.inventory || [];
   return {
+    turn: req.turnCount || 1,
+    hasBase: !!req.base?.hasBase,
     comps: comps.map(toView),
     day: nextDay, weather, zone, setting,
     waterCut: nextDay >= 7, blackout: nextDay >= 10,
@@ -990,7 +1018,10 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
   let consumedPending: string | null = null;
   const finalDay = nextDay >= 30;
 
-  if (specialAllowed && !finalDay) {
+  // Đã chuẩn bị cho trận tấn công thì trận đó phải đến ngay, không để sự kiện ngẫu nhiên chen ngang.
+  const raidImminent = !!req.base?.hasBase && zone === 'shelter' && (req.flags || []).includes('raid_warned');
+
+  if (specialAllowed && !finalDay && !raidImminent) {
     // 1) Cột mốc theo ngày (cột mốc 2 đi qua lịch có báo radio).
     for (let i = 0; i < STORY_MILESTONES.length; i++) {
       const m = STORY_MILESTONES[i];
@@ -1037,6 +1068,13 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
 
   if (consumedPending) pending = pending.filter((p) => p.id !== consumedPending);
 
+  // Căn cứ bị nhắm tới? Chỉ là XÁC SUẤT theo mức lộ diện: căn cứ trông bình thường thì không ai tấn công.
+  let raidWarn = false;
+  if (!next && !finalDay && req.base?.hasBase && zone === 'shelter' && day >= 4 && !(req.flags || []).includes('raid_warned') && day - raidDayOf(req.flags || []) >= 3) {
+    const ex = exposureOf({ base: req.base, flags: req.flags || [], day: nextDay, companionCount: comps.length, hasVehicle: !!req.hasVehicle });
+    raidWarn = rng() < ex.chance;
+  }
+
   // 5) Cảnh thường theo vùng đang đứng, nhu cầu cấp bách và chống lặp (trong ván + giữa các ván).
   if (!next) {
     const zoneNow = zone;
@@ -1049,7 +1087,9 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     const urgent = eligible.filter((s) => s.need && s.need(ctx) && !needRecent.includes(s.id));
     const fresh = eligible.filter((s) => !recent.includes(s.id));
     let scene: RoutineScene;
-    if (awayTooLong && returns.length && !recent.slice(-2).includes(returns[0].id)) scene = returns[0];
+    const raidScene = raidImminent ? ROUTINE_SCENES.find((s) => s.id === 'r_base_attack') : raidWarn ? ROUTINE_SCENES.find((s) => s.id === 'r_raid_warning') : undefined;
+    if (raidScene) scene = raidScene;
+    else if (awayTooLong && returns.length && !recent.slice(-2).includes(returns[0].id)) scene = returns[0];
     else if (urgent.length) scene = weightedPick(urgent.map((s) => ({ v: s, w: seenW(s.id) })), rng);
     else {
       const pool = fresh.length ? fresh : eligible.filter((s) => s.id !== done[done.length - 1]);
@@ -1191,6 +1231,7 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
       : undefined,
     soundCue: plan.next.soundCue,
     vehicle_delta: r.vehicleDelta || null,
+    base_delta: r.baseDelta || null,
     _needMap: plan.needMap,
   };
 }

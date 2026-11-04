@@ -5,6 +5,7 @@ import { MODULES, MODULE_BY_ID, SHELTER_SUITABILITY, costStatus, lvl } from '../
 import { itemIcon } from '../utils/itemIcon';
 import { BaseCutaway } from './BaseCutaway';
 import { Companion } from '../types/game';
+import { Exposure } from '../data/raid';
 import { sound } from '../utils/audio';
 import { Vehicle, VehicleKind, VEHICLES, REPAIR_COST, FUEL_RE, FUEL_PER_CAN } from '../data/vehicles';
 
@@ -18,6 +19,7 @@ interface Props {
   onEstablish: () => void;
   onBuild: (moduleId: string) => void;
   companions: Companion[];
+  exposure: Exposure;
   vehicle: Vehicle | null;
   onBuildVehicle: (kind: VehicleKind) => void;
   onRepairVehicle: () => void;
@@ -38,7 +40,7 @@ const LOOP: { id: string; label: string; icon: string }[] = [
   { id: 'generator', label: 'Điện', icon: '⚡' },
 ];
 
-export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLabel, placeName, loopStatus, onEstablish, onBuild, companions, vehicle, onBuildVehicle, onRepairVehicle, onRefuelVehicle, onStoreItem, onRetrieveItem, onClose }) => {
+export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLabel, placeName, loopStatus, onEstablish, onBuild, companions, exposure, vehicle, onBuildVehicle, onRepairVehicle, onRefuelVehicle, onStoreItem, onRetrieveItem, onClose }) => {
   const [tab, setTab] = useState<'overview' | 'build' | 'garage' | 'store'>('overview');
   const suit = SHELTER_SUITABILITY[settingId] || SHELTER_SUITABILITY.apartment_survivors;
 
@@ -99,6 +101,23 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
               {tab === 'overview' && (
                 <div className="space-y-4">
                   <BaseCutaway base={base} companions={companions} loopStatus={loopStatus} vehicle={vehicle} />
+                  <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-3">
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="font-bold text-white">Mức lộ diện của căn cứ</span>
+                      <span className={`font-mono ${exposure.chance === 0 ? 'text-emerald-300' : exposure.chance < 0.08 ? 'text-amber-300' : 'text-red-300'}`}>
+                        {exposure.chance === 0 ? 'Trông bình thường: không ai để ý' : `Nguy cơ bị tấn công khoảng ${Math.round(exposure.chance * 100)}% mỗi lượt`}
+                      </span>
+                    </div>
+                    <div className="mb-2 h-1.5 overflow-hidden rounded bg-neutral-900"><div className={`h-full ${exposure.chance === 0 ? 'bg-emerald-500' : exposure.chance < 0.08 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${Math.min(100, exposure.score)}%` }} /></div>
+                    {exposure.factors.length === 0 ? (
+                      <div className="text-[11px] text-neutral-400">Không có gì nổi bật: không tiếng ồn, không khói, không kho lớn. Càng im lìm càng an toàn.</div>
+                    ) : (
+                      <ul className="grid gap-x-4 gap-y-0.5 text-[11px] text-neutral-300 sm:grid-cols-2">
+                        {exposure.factors.slice(0, 8).map((x) => (<li key={x.label}>▸ {x.label} <span className="font-mono text-neutral-500">+{Math.round(x.value)}</span></li>))}
+                      </ul>
+                    )}
+                    <div className="mt-1.5 text-[10px] text-neutral-500">Dưới 14 điểm thì không ai tấn công. Muốn an toàn hơn thì bớt tiếng ồn, khói, và đừng để kho quá lộ liễu.</div>
+                  </div>
                   <p className="text-xs leading-relaxed text-neutral-400">Mỗi mắt xích cần đầu vào từ mắt xích trước. Thiếu nước thì vườn héo, thiếu rau thì gà không đẻ, thiếu nhiên liệu thì bếp và máy phát ngừng. Biogas biến rác vườn và chuồng gà thành nhiên liệu để vòng quay không dừng.</p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {LOOP.map((l, i) => (
