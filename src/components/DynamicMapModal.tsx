@@ -16,6 +16,10 @@ interface DynamicMapModalProps {
   baseNodeId?: string;               // cứ điểm đang dùng làm căn cứ
   hasBase: boolean;
   onClaimBase?: (node: WorldNode) => void;
+  siteProgressById?: Record<string, number>;     // % đã lục soát của từng điểm
+  dynamicExpiry?: Record<string, number>;        // điểm động hết hạn vào ngày nào
+  errandCandidates?: { id: string; name: string; cap: number }[];
+  onErrand?: (node: WorldNode, companionId: string) => void;
   vehicle: Vehicle | null;
   crewAvailable: number;
   onTravel: (node: WorldNode, lootStyle: 'quick' | 'thorough', hops: number, opts: { useVehicle: boolean; crew: number }) => void;
@@ -39,6 +43,10 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
   baseNodeId,
   hasBase,
   onClaimBase,
+  siteProgressById = {},
+  dynamicExpiry = {},
+  errandCandidates = [],
+  onErrand,
   vehicle,
   crewAvailable,
   onTravel,
@@ -50,8 +58,8 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
 
   const allNodes = useMemo(() => [...WORLD_NODES, ...extraNodes], [extraNodes]);
   const reg = useMemo(() => Object.fromEntries(allNodes.map((n) => [n.id, n])) as Record<string, WorldNode>, [allNodes]);
-  const visible = useMemo(() => revealedNodes(visitedNodes, extraNodes), [visitedNodes, extraNodes]);
-  const known = useMemo(() => knownNodes(visitedNodes, extraNodes), [visitedNodes, extraNodes]);
+  const visible = useMemo(() => { const v = new Set(revealedNodes(visitedNodes, extraNodes)); extraNodes.forEach((n) => { if (n.id.startsWith('dyn_')) v.add(n.id); }); return v; }, [visitedNodes, extraNodes]);
+  const known = useMemo(() => { const k = new Set(knownNodes(visitedNodes, extraNodes)); extraNodes.forEach((n) => { if (n.id.startsWith('dyn_')) k.add(n.id); }); return k; }, [visitedNodes, extraNodes]);
   // Điểm xuất phát của mọi chuyến đi là căn cứ hiện tại (nếu đã chuyển căn cứ) hoặc chỗ ở ban đầu
   const originId = baseNodeId && reg[baseNodeId] ? baseNodeId : HOME_NODE_ID;
   const home = reg[originId] || NODE_BY_ID[HOME_NODE_ID];
@@ -309,6 +317,27 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                       </div>
                       {visits > 0 && <div className="mt-1 text-[10px] text-amber-400">Đã ghé {visits} lần nên vật tư còn ít hơn.</div>}
                     </div>
+
+                    {siteProgressById[selected.id] !== undefined ? (
+                      <div className="rounded border border-neutral-800 bg-neutral-950/60 p-2 text-[11px]">
+                        <div className="mb-1 flex justify-between font-mono"><span className="text-neutral-400">Đã lục soát</span><span className={siteProgressById[selected.id] >= 100 ? 'text-emerald-300' : 'text-amber-300'}>{siteProgressById[selected.id]}%</span></div>
+                        <div className="h-1.5 overflow-hidden rounded bg-neutral-900"><div className={`h-full ${siteProgressById[selected.id] >= 100 ? 'bg-emerald-600' : 'bg-amber-600'}`} style={{ width: `${siteProgressById[selected.id]}%` }} /></div>
+                        {siteProgressById[selected.id] >= 100 && <div className="mt-1 text-emerald-300">Đã vét sạch: đến đây chỉ phí công.</div>}
+                      </div>
+                    ) : selected.id !== originId && <div className="text-[11px] text-neutral-500">Chưa lục soát lần nào.</div>}
+                    {dynamicExpiry[selected.id] !== undefined && <div className="rounded border border-sky-900/60 bg-sky-950/20 p-2 text-[11px] text-sky-200">Sự kiện tạm thời: chỉ còn tới hết ngày {dynamicExpiry[selected.id]}. Sau đó nơi này biến mất.</div>}
+
+                    {onErrand && errandCandidates.length > 0 && selected.id !== originId && !blockedByDistance && (
+                      <div className="space-y-1.5 rounded border border-emerald-900/60 bg-emerald-950/20 p-2 text-[11px]">
+                        <div className="font-mono text-[10px] uppercase tracking-wider text-emerald-300">Sai đệ đi loot hộ ({selected.region === 'near' ? 'nửa ngày' : 'cả ngày'})</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {errandCandidates.map((c) => (
+                            <button key={c.id} onClick={() => { sound.playClick(); onErrand(selected, c.id); }} className="cursor-pointer rounded border border-emerald-800 bg-emerald-950/50 px-2 py-1 text-emerald-100 hover:bg-emerald-900" title={`Khuân được khoảng ${c.cap} món`}>{c.name} · ~{c.cap} món</button>
+                          ))}
+                        </div>
+                        <div className="text-neutral-400">Họ đi một mình, về với những món dễ lấy. Nơi nguy hiểm có thể bị thương hoặc không về. Trong lúc đi, họ không làm việc ở căn cứ.</div>
+                      </div>
+                    )}
 
                     {selected.id !== originId && baseInfoOf(selected) && (() => { const info = baseInfoOf(selected)!; return (
                       <div className="space-y-2 rounded-lg border border-amber-800/60 bg-amber-950/20 p-3">

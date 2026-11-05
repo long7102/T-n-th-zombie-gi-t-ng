@@ -69,9 +69,11 @@ import { CompanionChat, ChatMsg } from './components/CompanionChat';
 import { computeTeamEffects } from './utils/teamEffects';
 import type { RoleId } from './data/companionChat';
 import { SceneIllustration } from './components/SceneIllustration';
-import { encodeMapAction, decodeMapAction, baseInfoOf, settingForKind, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
+import { encodeMapAction, decodeMapAction, baseInfoOf, settingForKind, buildDynamicNodes, placeDynamicSite, DynamicSiteInstance, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
 import { BaseHub } from './components/BaseHub';
 import { rq, addQty, fmtNamed, servingOf } from './data/units';
+import { LootSiteModal } from './components/LootSiteModal';
+import { buildSite, newSiteState, siteProgress, addHiddenContainer, resolveErrand, errandCapacity, SiteState, SiteKind } from './data/sites';
 import { NeedToast, NeedAlert } from './components/NeedToast';
 import { NEED_ALERT_AT, pickFood, pickWater } from './utils/needs';
 import { FORTIFY_ACTIONS } from './utils/baseSystem';
@@ -199,7 +201,13 @@ export default function App() {
 
   // Cứ điểm ngẫu nhiên quanh căn cứ (mỗi ván một bộ khác nhau) và trạng thái vòng khép kín của căn cứ
   const [outposts, setOutposts] = useState<OutpostInstance[]>([]);
+  const [siteStates, setSiteStates] = useState<Record<string, SiteState>>({});
+  const [activeSiteId, setActiveSiteId] = useState<string | null>(null);
+  const [siteLog, setSiteLog] = useState<string[]>([]);
+  const [dynamicSites, setDynamicSites] = useState<DynamicSiteInstance[]>([]);
   const outpostNodes = useMemo(() => buildOutpostNodes(outposts), [outposts]);
+  const dynamicNodes = useMemo(() => buildDynamicNodes(dynamicSites, day), [dynamicSites, day]);
+  const mapExtraNodes = useMemo(() => [...outpostNodes, ...dynamicNodes], [outpostNodes, dynamicNodes]);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
 
   // Nhật ký sự kiện quan trọng + tóm tắt trạng thái thế giới (ký ức dài hạn)
@@ -262,7 +270,7 @@ export default function App() {
         const snapshot = {
           player, base, companions, day, turnCount, clock, location, weather, weatherLabel, tomorrowForecast,
           backgroundEffect, dangerLevel, history: history.slice(-60), currentTurn, pendingEvents, pendingRecruit, visitedNodes, mapVisits,
-          settingId, originSettingId, zone, awayTurns, worldFlags, outposts, vehicle, worldLog,
+          settingId, originSettingId, siteStates, dynamicSites, zone, awayTurns, worldFlags, outposts, vehicle, worldLog,
         };
         localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
         setHasSave(true);
@@ -304,6 +312,8 @@ export default function App() {
       setAwayTurns(s.awayTurns || 0);
       setWorldFlags(s.worldFlags || []);
       setOutposts(s.outposts || generateOutposts(4));
+      setSiteStates(s.siteStates || {});
+      setDynamicSites(s.dynamicSites || []);
       setVehicle(s.vehicle || null);
       setWorldLog(s.worldLog || []);
       setActiveEmergency(false);
@@ -522,6 +532,8 @@ export default function App() {
           tomorrowForecast,
           pendingEvents,
           pendingRecruit,
+          dynamicSites: dynamicSites.map((d) => ({ id: d.id, kind: d.kind, expiresDay: d.expiresDay })),
+          housesVisited: Object.keys(siteStates).filter((k) => k.startsWith('house:')).length,
           chosenAction: action,
           actionType,
           currentLocation: location,
@@ -605,7 +617,7 @@ export default function App() {
       // Đi loot xa hoặc đang ở ngoài: căn cứ tạm ngừng hoạt động (bếp nguội, vườn không ai chăm, đồng đội chỉ trông nhà) cho tới khi bạn về
       const awayFromBase = !!decodeMapAction(action) || data.zone === 'outside';
       const emptyTeam = { sanity: 0, hunger: 0, infection: 0, fortification: 0, loot: [] as Item[], log: awayFromBase && base.hasBase ? ['Bạn đang đi vắng nên căn cứ tạm ngừng hoạt động: bếp nguội, vườn không ai chăm, mọi người chỉ trông nhà.'] : [], companionDelta: {} as Record<string, { morale?: number; hp?: number }> };
-      const team = awayFromBase ? emptyTeam : computeTeamEffects(companions, base.hasBase, currentWound.hasOpenWound, worldFlags);
+      const team = awayFromBase ? emptyTeam : computeTeamEffects(companions.filter((c) => !c.errand), base.hasBase, currentWound.hasOpenWound, worldFlags);
       const bt = awayFromBase ? { base, log: [] as string[], sanity: 0, infection: 0, danger: 0, loopStatus: {} as Record<string, 'ok' | 'starved' | 'off'> } : tickBase(base, (data.weather || weather) as WeatherType, turnCount + 1);
       const effectiveMaxHp = lockedMaxHp || player.stats.maxHp;
       const nextHp = Math.max(0, Math.min(effectiveMaxHp, player.stats.hp + (data.statChanges?.hp || 0)));
@@ -806,6 +818,49 @@ export default function App() {
       const nextDay = Math.floor(nextClock / 6) + 1;
       setClock(nextClock);
       setTurnCount(nextTurnNum);
+
+      // Điểm động mới xuất hiện trên bản đồ (bão trôi thùng hàng, máy bay rơi, xe tải cướp)
+      if (data.dynamic_site) {
+        const spec = data.dynamic_site;
+        const taken = [...outposts.map((o) => ({ x: o.x, y: o.y })), ...dynamicSites.map((d) => ({ x: d.x, y: d.y }))];
+        setDynamicSites((prev) => [...prev, placeDynamicSite(spec, nextDay, taken)]);
+        setWorldLog((prev) => [...prev, { day: nextDay, turn: nextTurnNum, kind: 'survival' as const, text: spec.hint }].slice(-60));
+        setLootNotifications([`Sự kiện: ${spec.name} (xem trên bản đồ, còn tới hết ngày ${spec.expiresDay})`]);
+      }
+
+      // Đệ được sai đi loot đã về tới nơi
+      const returning = companions.filter((c) => c.errand && (c.errand.returnClock <= nextClock));
+      if (returning.length) {
+        let working = { ...siteStates };
+        const bring: Item[] = [];
+        const notes: string[] = [];
+        const hurtMap: Record<string, number> = {};
+        const lostIds: string[] = [];
+        for (const c of returning) {
+          const st = working[c.errand!.siteId];
+          if (!st) continue;
+          const res = resolveErrand(st, { name: c.name, hp: c.hp, age: c.age, gender: c.gender, skills: c.skills, role: c.role, traits: c.traits });
+          working = { ...working, [c.errand!.siteId]: res.st };
+          bring.push(...res.items);
+          notes.push(res.log);
+          if (res.hurt) hurtMap[c.id] = res.hurt;
+          if (res.lost) lostIds.push(c.id);
+        }
+        setSiteStates(working);
+        setCompanions((prev) => prev.map((c) => {
+          if (!returning.some((r) => r.id === c.id)) return c;
+          if (lostIds.includes(c.id)) return { ...c, errand: undefined, status: 'deceased' as const, hp: 0 };
+          return { ...c, errand: undefined, hp: Math.max(5, c.hp - (hurtMap[c.id] || 0)), trust: Math.min(100, c.trust + 2) };
+        }));
+        if (bring.length) giveItems(bring);
+        if (notes.length) {
+          setLootNotifications((prev) => [...prev, ...notes]);
+          setWorldLog((prev) => [...prev, ...notes.map((t) => ({ day: nextDay, turn: nextTurnNum, kind: 'survival' as const, text: t }))].slice(-60));
+        }
+      }
+
+      // Tới một điểm loot: mở giao diện kiểm tra từng hòm đồ
+      if (data.site_visit) openSite(data.site_visit);
       setDay(nextDay);
 
       // Check Defeat Conditions (HP <= 0 or Sanity <= 0)
@@ -1202,6 +1257,117 @@ export default function App() {
       log: worldLog,
     });
   const pushLog = (kind: WorldEvent['kind'], text: string) => setWorldLog((prev) => [...prev, { day, turn: turnCount, kind, text }].slice(-60));
+
+  // ---------- Điểm loot: kiểm tra hòm đồ, % đã lục, đệ đi loot hộ ----------
+  const giveItems = (items: Item[]) => {
+    if (!items.length) return;
+    setPlayer((p) => {
+      const inv = p.inventory.map((i) => ({ ...i }));
+      for (const it of items) {
+        const ex = inv.find((i) => i.name === it.name && (i.freshness ?? 100) >= (it.freshness ?? 100) - 15 && (i.freshness ?? 100) <= (it.freshness ?? 100) + 15);
+        if (ex) ex.quantity = rq(ex.quantity + it.quantity); else inv.push({ ...it });
+      }
+      return { ...p, inventory: inv };
+    });
+  };
+
+  const openSite = (sv: { nodeId?: string; kind?: 'house'; style?: 'quick' | 'thorough' }) => {
+    let id: string; let name: string; let kind: SiteKind; let danger: number;
+    if (sv.kind === 'house') {
+      const n = Object.keys(siteStates).filter((k) => k.startsWith('house:')).length + 1;
+      id = `house:${n}`; kind = 'house'; danger = 2;
+      name = settingId === 'apartment_survivors' ? `Căn hộ bỏ hoang số ${n}` : `Căn nhà hoang số ${n}`;
+    } else {
+      const node = sv.nodeId ? getNodeAny(sv.nodeId) || nodeRegistry(sv.nodeId) : undefined;
+      if (!node) return;
+      id = node.id; name = node.name.split(' - ')[0]; kind = node.kind as SiteKind; danger = node.danger;
+    }
+    setSiteStates((prev) => {
+      let st = prev[id];
+      if (!st) {
+        const used = Object.values(prev).map((v) => v.site.story?.id).filter(Boolean) as string[];
+        st = newSiteState(buildSite({ id, name, kind, danger, usedStories: used }));
+      }
+      if (sv.style === 'thorough') st = addHiddenContainer(st);
+      return { ...prev, [id]: { ...st, visits: st.visits + 1 } };
+    });
+    setSiteLog([]);
+    setActiveSiteId(id);
+  };
+  const nodeRegistry = (id: string) => mapExtraNodes.find((n) => n.id === id);
+
+  const siteHasTool = (source: string) => player.inventory.some((i) => new RegExp(source, 'i').test(i.name) && i.quantity > 0);
+
+  const handleSiteSearch = (cid: string) => {
+    const st = activeSiteId ? siteStates[activeSiteId] : undefined;
+    if (!st || !activeSiteId) return;
+    const ct = st.site.containers.find((c) => c.id === cid);
+    if (!ct) return;
+    const key = activeSiteId;
+    setSiteStates((p) => ({ ...p, [key]: { ...p[key], searched: p[key].searched.includes(cid) ? p[key].searched : [...p[key].searched, cid] } }));
+    const hit = Math.random() < Math.min(0.6, ct.noise * 0.08 * (st.site.danger / 2));
+    setPlayer((p) => ({ ...p, stats: { ...p.stats, stamina: Math.max(0, p.stats.stamina - 2), hp: hit ? Math.max(1, p.stats.hp - 4) : p.stats.hp, sanity: hit ? Math.max(0, p.stats.sanity - 2) : p.stats.sanity } }));
+    setSiteLog((l) => [...l, hit ? `Tiếng động khi mở ${ct.name} kéo một bóng đen tới. Bạn kịp đẩy lui nhưng bị cào xước (-4 máu).` : ct.items.length ? `Bạn mở ${ct.name}: thấy ${ct.items.length} món.` : `${ct.name} trống rỗng.`]);
+    if (hit) sound.playCue('zombie_growl');
+  };
+
+  const handleSiteTake = (cid: string, idx: number) => {
+    if (!activeSiteId) return;
+    const key = activeSiteId;
+    const st = siteStates[key];
+    const ct = st?.site.containers.find((c) => c.id === cid);
+    if (!st || !ct || (st.taken[cid] || []).includes(idx)) return;
+    const it = ct.items[idx];
+    if (!it) return;
+    giveItems([it]);
+    setSiteStates((p) => ({ ...p, [key]: { ...p[key], taken: { ...p[key].taken, [cid]: [...(p[key].taken[cid] || []), idx] } } }));
+    setLootNotifications([fmtNamed(it)]);
+  };
+
+  const handleSiteTakeAll = (cid: string) => {
+    if (!activeSiteId) return;
+    const key = activeSiteId;
+    const st = siteStates[key];
+    const ct = st?.site.containers.find((c) => c.id === cid);
+    if (!st || !ct) return;
+    const done = st.taken[cid] || [];
+    const items = ct.items.filter((_, i) => !done.includes(i));
+    if (!items.length) return;
+    giveItems(items);
+    setSiteStates((p) => ({ ...p, [key]: { ...p[key], taken: { ...p[key].taken, [cid]: ct.items.map((_, i) => i) } } }));
+    setLootNotifications(items.map((i) => fmtNamed(i)));
+  };
+
+  const handleSiteEvidence = () => {
+    if (!activeSiteId) return;
+    const key = activeSiteId;
+    const st = siteStates[key];
+    const story = st?.site.story;
+    if (!st || !story || st.evidenceSeen) return;
+    setSiteStates((p) => ({ ...p, [key]: { ...p[key], evidenceSeen: true } }));
+    setPlayer((p) => ({ ...p, stats: { ...p.stats, sanity: Math.max(0, Math.min(100, p.stats.sanity + story.sanity)) } }));
+    if (story.gain) giveItems([{ description: '', rarity: 'common', quantity: 1, ...story.gain, id: `${story.gain.id}_${Date.now().toString(36)}` } as Item]);
+    if (story.flag) setWorldFlags((f) => (f.includes(story.flag!) ? f : [...f, story.flag!]));
+    setWorldLog((prev) => [...prev, { day, turn: turnCount, kind: 'survival' as const, text: `${story.title}: ${story.evidence.slice(0, 90)}...` }].slice(-60));
+  };
+
+  // Sai đệ đi loot hộ: đi nửa ngày (gần) hoặc cả ngày (xa), mang về vài món theo sức khuân, có thể bị thương hoặc không về
+  const handleErrand = (node: WorldNode, companionId: string) => {
+    const c = companions.find((x) => x.id === companionId);
+    if (!c || c.errand) return;
+    const ticks = node.region === 'near' ? 3 : 6;
+    let ensured = siteStates[node.id];
+    if (!ensured) {
+      const used = Object.values(siteStates).map((v) => v.site.story?.id).filter(Boolean) as string[];
+      ensured = newSiteState(buildSite({ id: node.id, name: node.name.split(' - ')[0], kind: node.kind as SiteKind, danger: node.danger, usedStories: used }));
+      setSiteStates((p) => ({ ...p, [node.id]: ensured }));
+    }
+    setCompanions((prev) => prev.map((x) => (x.id === companionId ? { ...x, errand: { siteId: node.id, startClock: clock, returnClock: clock + ticks, siteName: node.name.split(' - ')[0] } } : x)));
+    setShowMapModal(false);
+    setLootNotifications([`${c.name} đi loot hộ ở ${node.name.split(' - ')[0]}, về sau ${ticks === 3 ? 'nửa ngày' : 'cả ngày'}.`]);
+    setVisitedNodes((prev) => (prev.includes(node.id) ? prev : [...prev, node.id]));
+    pushLog('survival', `Sai ${c.name} đi loot ở ${node.name}`);
+  };
 
   // Bỏ căn cứ hiện tại để chọn nơi khác: kho chuyển vào ba lô, công trình mất
   const handleAbandonBase = () => {
@@ -1672,6 +1838,9 @@ export default function App() {
     setAwayTurns(0);
     setWorldFlags([]);
     setOutposts([]);
+    setSiteStates({});
+    setDynamicSites([]);
+    setActiveSiteId(null);
     setVehicle(null);
     setWorldLog([]);
     setLoopStatus({});
@@ -2321,7 +2490,11 @@ export default function App() {
           weather={weather}
           stamina={player.stats.stamina}
           homeName={base.hasBase ? base.name : location}
-          extraNodes={outpostNodes}
+          extraNodes={mapExtraNodes}
+          siteProgressById={Object.fromEntries(Object.entries(siteStates).map(([k, v]) => [k, siteProgress(v).pct]))}
+          dynamicExpiry={Object.fromEntries(dynamicSites.map((d) => [d.id, d.expiresDay]))}
+          errandCandidates={companions.filter((c) => c.status !== 'deceased' && !c.errand && c.hp >= 40 && c.trust >= 35).map((c) => ({ id: c.id, name: c.name, cap: errandCapacity(c) }))}
+          onErrand={handleErrand}
           baseNodeId={base.baseNodeId}
           hasBase={base.hasBase}
           onClaimBase={handleClaimBase}
@@ -2329,6 +2502,19 @@ export default function App() {
           crewAvailable={companions.filter((c) => c.status !== 'deceased' && c.hp >= 25).length}
           onTravel={handleTravelFromMap}
           onClose={() => setShowMapModal(false)}
+        />
+      )}
+
+      {activeSiteId && siteStates[activeSiteId] && (
+        <LootSiteModal
+          state={siteStates[activeSiteId]}
+          hasTool={siteHasTool}
+          log={siteLog}
+          onSearch={handleSiteSearch}
+          onTake={handleSiteTake}
+          onTakeAll={handleSiteTakeAll}
+          onEvidence={handleSiteEvidence}
+          onLeave={() => setActiveSiteId(null)}
         />
       )}
 

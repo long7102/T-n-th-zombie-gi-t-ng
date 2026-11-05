@@ -9,6 +9,7 @@ import { buildRadioTransmission, RadioIntel } from './radio';
 import { composeEnding, EndingInput } from './storyArc';
 import { servingOf, fmtNamed } from './units';
 import { damageReduction } from './equipment';
+import { dynamicSiteFor, DynamicSiteSpec } from './sites';
 import { resolveRaid, raidTypeFor, raidDayOf, exposureOf, RaidType } from './raid';
 import { decodeMapAction, getNodeAny, REGION_LABEL } from './worldMap';
 import { VEHICLES, ROAD_EVENTS, SAFE_ROAD_LINES, fuelNeededRoundTrip, VehicleKind } from './vehicles';
@@ -43,6 +44,7 @@ export interface ChosenResolution {
   flagsRemove?: string[];
   baseDelta?: { fortification: number; moduleLoss: string[]; stolen: { name: string; quantity: number }[] };
   vehicleDelta?: { condition: number; fuel: number };
+  siteVisit?: { nodeId?: string; kind?: 'house'; style?: 'quick' | 'thorough' }; // mở giao diện kiểm tra hòm đồ
   timeCost?: number;            // số nhịp đồng hồ tốn (6 nhịp = 1 ngày; mặc định 2)
   deterministic: boolean;
 }
@@ -66,6 +68,7 @@ export interface TurnPlan {
   nextDay: number;
   nextTurn: number;
   clock: number;
+  dynamicSite: DynamicSiteSpec | null;
   newDay: boolean;
   weather: WeatherType;
   forecast: WeatherForecast;
@@ -651,38 +654,12 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
     if (rng() < 0.4) r.woundChange = { inflicted: true, location: 'Vết cào rách trên cẳng tay' };
   }
 
-  const depletion = 1 / (1 + mt.visits);
-  let gained: Partial<Item>[] = [];
-  const table = node.table || NODE_TABLE[node.id];
-  if (table) {
-    const n = Math.max(1, Math.round((thorough ? 4 : 2) * Math.max(0.4, depletion)));
-    gained = rollLoot(table, n, rng);
-  } else {
-    for (const it of node.loot.common) {
-      const q = Math.max(0, Math.round((it.quantity || 1) * depletion * (thorough ? 1.2 : 1)));
-      if (q >= 1 || rng() < depletion) gained.push({ ...it, quantity: Math.max(1, q) });
-    }
-  }
-  if (thorough && node.loot.rare && rng() < 0.55 * Math.max(0.35, depletion)) {
-    gained.push(pickFrom(node.loot.rare, rng));
-    lines.push('Bạn dành thêm thời gian phá khóa, cạy tủ và lật từng ngăn kéo; tiếng động lớn nhưng món đồ giá trị nằm sâu bên trong đã nằm gọn trong tay bạn.');
-    if (rng() < 0.15 + node.danger * 0.05) {
-      stats.hp = (stats.hp || 0) - (2 + node.danger * 2);
-      stats.sanity = (stats.sanity || 0) - 3;
-      lines.push('Nhưng tiếng ồn khiến vài bóng đen lảo đảo kéo tới, bạn phải rút lui trong thế bị rượt.');
-    }
-  } else if (thorough) {
-    lines.push('Bạn lục soát cẩn thận hơn nhưng không tìm thêm gì quý giá.');
-  } else {
-    lines.push('Bạn lục soát nhanh, nhặt những thứ dễ lấy nhất rồi rút lui trong im lặng.');
-  }
-  if (crew > 0 && table) {
-    gained.push(...rollLoot(table, crew, rng));
-    lines.push(`Có ${crew} người đi cùng nên bạn mang về được nhiều hơn.`);
-  }
-  if (!gained.length) lines.push('Nơi này gần như đã bị vét sạch từ những lần ghé trước, bạn quay về tay không.');
-  else if (mt.visits > 0) lines.push('Vật tư ở đây đã vơi đi nhiều sau những lần ghé trước.');
-  lines.push(`Cuối cùng bạn quay trở về ${setting.labels.shelter}, mệt lả.`);
+  // Không còn loot ngẫu nhiên mỗi lần ghé: bạn tới nơi rồi tự tay kiểm tra từng hòm đồ (đồ đã lấy không mọc lại).
+  const gained: Partial<Item>[] = [];
+  lines.push(thorough ? 'Bạn lẻn vào bằng lối phụ, kiểm tra từng ngóc ngách kỹ càng, chấp nhận ồn hơn một chút.' : 'Bạn quan sát một vòng, chọn lối vào ít tiếng động nhất rồi bước vào.');
+  r.siteVisit = { nodeId: node.id, style: thorough ? 'thorough' : 'quick' };
+
+  if (crew > 0) lines.push(`Có ${crew} người đi cùng giúp bạn canh chừng trong lúc lục soát.`);
 
   // Thời gian đi loot: gần mất nửa ngày, xa mất cả ngày; càng lâu càng đói khát
   const whole = node.region !== 'near';
@@ -708,6 +685,7 @@ function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId:
   // Trạm y tế bị cô lập: nguồn lực khan hiếm hơn hẳn
   const scarcity = setting.id === 'clinic_containment' ? 0.75 : 1;
   for (const ro of rolls) if (rng() < (ro.chance ?? 1) * scarcity) r.gain.push(...rollLoot(ro.table, ro.n, rng));
+  if (ch.site) r.siteVisit = { kind: ch.site };
   if (ch.flags) r.flags = [...ch.flags];
   if (ch.flagsRemove) r.flagsRemove = [...ch.flagsRemove];
   // Cờ động cho hệ thống tấn công căn cứ
@@ -1003,6 +981,7 @@ function buildCtx(req: any, nextDay: number, weather: WeatherType, zone: Zone, s
     hasRawFood: inv.some((i) => i.category === 'food' && i.needsCooking && !i.isCooked && (i.quantity ?? 1) > 0),
     night: weather === 'night_dark',
     flags: req.flags || [],
+    housesVisited: req.housesVisited || 0,
   };
 }
 
@@ -1180,6 +1159,17 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
     }
   }
 
+  // Sự kiện động bổ sung tài nguyên: bão làm trôi thùng hàng, máy bay cứu trợ rơi, xe tải của nhóm cướp bị zombie tấn công
+  let dynamicSite: DynamicSiteSpec | null = null;
+  const dynList: any[] = req.dynamicSites || [];
+  if (newDay && nextDay >= 3 && dynList.length < 9 && dynList.filter((d) => d.expiresDay >= nextDay).length < 2) {
+    const r1 = rng();
+    const r2 = rng();
+    if (weather === 'heavy_rain' && r1 < 0.5) dynamicSite = dynamicSiteFor('flood', nextDay, dynList.length + 1);
+    else if (nextDay >= 4 && r2 < 0.08) dynamicSite = dynamicSiteFor('crash', nextDay, dynList.length + 1);
+    else if (r2 >= 0.08 && r2 < 0.2) dynamicSite = dynamicSiteFor('truck', nextDay, dynList.length + 1);
+  }
+
   const lockOutside = setting.id === 'clinic_containment' && !(req.flags || []).includes('clinic_breach');
   let next: NextScene | null = null;
   let consumedPending: string | null = null;
@@ -1311,7 +1301,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
   const recentChoices = (req.history || []).slice(-3).flatMap((h: any) => h.choices || []);
 
   return {
-    resolution, next, day, nextDay, nextTurn, clock: nextClock, newDay, weather, forecast, pending,
+    resolution, next, day, nextDay, nextTurn, clock: nextClock, dynamicSite, newDay, weather, forecast, pending,
     systemTrigger, radio, systemNote,
     waterCut: ctx.waterCut, blackout: ctx.blackout,
     needMap: newDay && !inv.some((i) => /băng|gạc|thuốc/i.test(i.name || '')),
@@ -1384,6 +1374,8 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
     choices: plan.next.choices,
     scene_id: plan.next.id,
     clock: plan.clock,
+    dynamic_site: plan.dynamicSite,
+    site_visit: r.siteVisit || null,
     zone: plan.zone,
     awayTurns: plan.awayTurns,
     customChoiceAllowed: true,

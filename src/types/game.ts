@@ -142,6 +142,7 @@ export interface Companion {
   nameKnown?: boolean;   // false = chưa biết tên
   joinedTurn?: number;   // Lượt gia nhập (để tính lúc lộ tên)
   assignment?: string;   // Việc chính (phần tử đầu của assignments): guard | cook | scout | repair | medic | forage | rest
+  errand?: { siteId: string; startClock: number; returnClock: number; siteName: string }; // đang được sai đi loot hộ
   assignments?: string[]; // Nhiều việc cùng lúc, số lượng tối đa tùy sức khỏe, tinh thần và kỹ năng
   askedPlayerName?: boolean; // Đã hỏi tên người chơi chưa
   traits?: string[];     // Tính cách riêng: brave, coward, greedy, loyal, jealous, kind, hot_tempered

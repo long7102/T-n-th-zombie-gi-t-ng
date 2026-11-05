@@ -226,7 +226,7 @@ export const CompanionPanel: React.FC<CompanionPanelProps> = ({
                             {comp.age} tuổi
                           </span>
                         </div>
-                        <p className="text-xs text-neutral-400">{comp.role}</p>
+                        <p className="text-xs text-neutral-400">{comp.role}{comp.errand && <span className="ml-2 rounded border border-emerald-800 bg-emerald-950/60 px-1.5 py-0.5 text-[10px] text-emerald-300">Đang đi loot ở {comp.errand.siteName}</span>}</p>
                       </div>
                     </div>
 
