@@ -29,6 +29,38 @@ export function roleFit(role: RoleId, companion: { role?: string; skills?: strin
   return /y tá|dược|bác sĩ/i.test(companion.role || '') && role === 'guard' ? 'poor' : 'ok';
 }
 
+// ---- Nhiều việc cùng lúc ----
+export const ROLE_ORDER: RoleId[] = ['guard', 'cook', 'scout', 'repair', 'medic', 'forage', 'rest'];
+
+export function rolesOf(c: { assignments?: string[]; assignment?: string }): RoleId[] {
+  const list = (c.assignments && c.assignments.length ? c.assignments : c.assignment ? [c.assignment] : []) as RoleId[];
+  return list.filter((r, i) => ROLE_ORDER.includes(r) && list.indexOf(r) === i);
+}
+
+// Số việc tối đa cùng lúc: người khỏe, tinh thần tốt và nhiều kỹ năng gánh được 4 việc; người yếu chỉ 1-2.
+export function roleCapacity(c: { hp?: number; morale?: number; status?: string; skills?: string[] }): number {
+  const hp = c.hp ?? 100;
+  const morale = c.morale ?? 50;
+  if (c.status === 'injured' || c.status === 'unconscious' || hp < 40) return 1;
+  if (hp < 60 || morale < 40) return 2;
+  if (morale >= 70 && hp >= 80 && (c.skills || []).length >= 2) return 4;
+  return 3;
+}
+
+// Hiệu suất theo thể trạng: việc nặng nhọc hợp người khỏe, trẻ hoặc cao tuổi làm kém hơn.
+export function roleAptitude(role: RoleId, c: { gender?: string; age?: number; hp?: number }): number {
+  const age = c.age ?? 30;
+  let m = 1;
+  if (role === 'guard' || role === 'repair' || role === 'forage') {
+    if (c.gender === 'male') m *= 1.1;
+    if (age >= 55) m *= 0.8; else if (age < 20) m *= 0.85;
+  }
+  if (role === 'scout' && age >= 55) m *= 0.8;
+  if ((role === 'medic' || role === 'cook') && age < 18) m *= 0.8;
+  if ((c.hp ?? 100) < 50) m *= 0.8;
+  return m;
+}
+
 export const TRAIT_LABEL: Record<string, string> = {
   brave: 'Dũng cảm', coward: 'Nhát gan', greedy: 'Tham lam', loyal: 'Trung thành', jealous: 'Hay ghen', kind: 'Tốt bụng', hot_tempered: 'Nóng tính',
 };
@@ -37,18 +69,19 @@ export interface ChatCompanion {
   traits?: string[];
   name: string; realName?: string; nameKnown?: boolean; gender: 'male' | 'female'; age: number; role?: string;
   personality?: string; bio?: string; skills?: string[]; trust: number; affection: number; morale: number;
-  intimacyLevel?: string; status?: string; assignment?: string; hp?: number;
+  intimacyLevel?: string; status?: string; assignment?: string; assignments?: string[]; hp?: number;
+  incubation?: { isInfected?: boolean };
 }
 export interface ChatPlayer { gender: 'male' | 'female' | 'other'; name?: string; nameKnown?: boolean; sanity?: number; }
 export interface ChatReq {
   companion: ChatCompanion; player: ChatPlayer; text: string;
   history?: { from: 'player' | 'npc'; text: string }[];
-  context?: { day?: number; zoneLabel?: string; weather?: string; hasBase?: boolean; safe?: boolean };
+  context?: { day?: number; zoneLabel?: string; weather?: string; hasBase?: boolean; safe?: boolean; interview?: boolean };
   askedName?: boolean;
 }
 export interface ChatRes {
   reply: string; affectionChange: number; trustChange: number; moraleChange: number; sanityChange: number;
-  mood: Mood; intimacyLevel?: string; revealName?: boolean; asksPlayerName?: boolean; assignment?: RoleId;
+  mood: Mood; intimacyLevel?: string; revealName?: boolean; asksPlayerName?: boolean; assignment?: RoleId; assignments?: RoleId[];
   romanceAllowed: boolean; intent: string;
 }
 
@@ -61,17 +94,19 @@ export function romanceAllowed(c: ChatCompanion, p: ChatPlayer): boolean {
   return (p.gender === 'male' || p.gender === 'female') && c.gender !== p.gender && c.age >= 18;
 }
 
-type Intent = 'insult' | 'assign' | 'intimate' | 'confess' | 'flirt' | 'askName' | 'askPast' | 'comfort' | 'compliment' | 'thanks' | 'apology' | 'food' | 'plan' | 'joke' | 'greet' | 'other';
+type Intent = 'askSkills' | 'askBitten' | 'insult' | 'assign' | 'intimate' | 'confess' | 'flirt' | 'askName' | 'askPast' | 'comfort' | 'compliment' | 'thanks' | 'apology' | 'food' | 'plan' | 'joke' | 'greet' | 'other';
 
-export function detectIntent(text: string): { intent: Intent; role?: RoleId } {
+export function detectIntent(text: string): { intent: Intent; role?: RoleId; roles?: RoleId[] } {
   const a = text.toLowerCase();
   if (W('ngu|đần|câm mồm|im đi|đồ khốn|chết đi|vô dụng|đồ ăn hại|ghét').test(a)) return { intent: 'insult' };
-  for (const id of ['guard', 'cook', 'scout', 'repair', 'medic', 'forage', 'rest'] as RoleId[]) {
-    if (ROLES[id].words.test(a) && W('nhờ|giúp|lo|phụ trách|đảm nhận|phân công|cậu|bạn|em|chị|anh|cô|chú|giao|để').test(a)) {
-      return { intent: 'assign', role: id };
-    }
+  // Một câu có thể giao nhiều việc: "canh gác và nấu ăn, sửa luôn cái cửa"
+  const asked = ROLE_ORDER.filter((id) => ROLES[id].words.test(a));
+  if (asked.length && W('nhờ|giúp|lo|phụ trách|đảm nhận|phân công|cậu|bạn|em|chị|anh|cô|chú|giao|để').test(a)) {
+    return { intent: 'assign', role: asked[0], roles: asked };
   }
   if (W('phân công|giao việc|giao nhiệm vụ').test(a)) return { intent: 'assign', role: 'none' };
+  if (W('bị cắn|bị thương|vết thương|nhiễm|sốt|bị xước|vết cào|có sao không').test(a)) return { intent: 'askBitten' };
+  if (W('biết làm|làm được gì|giỏi|kỹ năng|sở trường|có tài|biết gì|đánh nhau|sửa|nấu|y tế').test(a) && W('bạn|cậu|em|chị|anh|cô|chú|bác|ông').test(a)) return { intent: 'askSkills' };
   if (W('làm tình|quan hệ|lên giường|ngủ với|ngủ cùng|qua đêm|ôm ngủ|hôn|âu yếm|ân ái').test(a)) return { intent: 'intimate' };
   if (W('yêu|làm người yêu|làm bạn gái|làm bạn trai|ở bên|lấy|cưới|thích (em|anh|chị|cô|cậu|bạn)').test(a)) return { intent: 'confess' };
   if (W('đẹp|xinh|dễ thương|duyên|quyến rũ|cuốn hút|nhớ (em|anh|chị|cô)|tán|cười|ôm|nắm tay|đẹp trai|ga lăng|thơm').test(a)) return { intent: 'flirt' };
@@ -201,7 +236,7 @@ export function offlineChat(req: ChatReq, rng: Rng = Math.random): ChatRes {
   const p = req.player;
   const romantic = c.intimacyLevel === 'romantic' || c.intimacyLevel === 'soulmate';
   const allow = romanceAllowed(c, p);
-  const { intent, role } = detectIntent(req.text);
+  const { intent, role, roles: askedRoles } = detectIntent(req.text);
   const pr = pronouns(c, p, romantic && allow);
   const tr = tier(c);
   const res: ChatRes = { reply: '', affectionChange: 0, trustChange: 0, moraleChange: 0, sanityChange: 0, mood: 'neutral', romanceAllowed: allow, intent };
@@ -209,6 +244,20 @@ export function offlineChat(req: ChatReq, rng: Rng = Math.random): ChatRes {
   const line = (pool?: Pool) => fill(pick((pool || POOLS.other!)[tr], rng), c, pr);
 
   switch (intent) {
+    case 'askBitten': {
+      const infected = !!c.incubation?.isInfected;
+      const liar = (c.traits || []).some((t) => t === 'greedy' || t === 'coward');
+      if (infected && rng() < (liar ? 0.8 : 0.45)) { res.reply = fill('Không, {me} ổn. Chỉ là mệt thôi. Đừng nhìn {me} như thế.', c, pr); res.mood = 'wary'; }
+      else if (infected) { res.reply = fill('...{me} bị cào ở sườn từ tối qua. {me} sợ nói ra thì {you} bỏ {me} lại. Nhưng {you} có quyền biết.', c, pr); res.trustChange = 4; res.mood = 'sad'; }
+      else { res.reply = fill('Không có vết cắn nào cả. {you} cứ kiểm tra, {me} không giấu gì đâu.', c, pr); res.trustChange = 2; res.mood = 'warm'; }
+      break;
+    }
+    case 'askSkills': {
+      const sk = (c.skills || []).filter(Boolean);
+      res.reply = fill(sk.length ? `{me} từng làm ${(c.role || 'người sống sót').toLowerCase()}. Việc {me} làm được: ${sk.join(', ').toLowerCase()}. Giao việc gì {me} cũng cố.` : '{me} không có tay nghề gì đặc biệt, nhưng chịu khó và không ăn nhiều.', c, pr);
+      res.trustChange = 2; res.mood = 'neutral';
+      break;
+    }
     case 'greet': res.reply = line(POOLS.greet); res.trustChange = 1; res.mood = 'neutral'; break;
     case 'comfort': res.reply = line(POOLS.comfort); res.trustChange = 3; res.moraleChange = 6; res.affectionChange = 2; res.sanityChange = 2; res.mood = tr === 'low' ? 'wary' : 'sad'; break;
     case 'compliment': res.reply = line(POOLS.compliment); res.affectionChange = tr === 'low' ? 0 : tr === 'mid' ? 2 : 3; res.mood = tr === 'high' ? 'shy' : 'neutral'; break;
@@ -233,10 +282,24 @@ export function offlineChat(req: ChatReq, rng: Rng = Math.random): ChatRes {
       if (r === 'none') { res.reply = fill('Việc gì cũng được, {you} cứ nói rõ: canh gác, nấu ăn, trinh sát, sửa chữa, y tế, kiếm đồ ăn, hay nghỉ ngơi?', c, pr); break; }
       if (c.status === 'injured' || (c.hp !== undefined && c.hp < 25)) { res.reply = fill('{me} đang yếu quá, chắc không làm tốt việc này được lúc này.', c, pr); res.mood = 'sad'; break; }
       if (c.morale < 20 || c.trust < 20) { res.reply = fill('{me} không muốn nhận việc từ {you} lúc này.', c, pr); res.mood = 'upset'; res.moraleChange = -2; break; }
-      const fit = roleFit(r, c);
-      res.assignment = r;
-      res.reply = fill(pick(ASSIGN_REPLY[fit], rng), c, pr) + ` (Nhận việc: ${ROLES[r].label}.)`;
-      res.trustChange = fit === 'great' ? 3 : 1; res.moraleChange = fit === 'poor' ? -2 : 2; res.mood = 'neutral';
+      const wanted = (askedRoles && askedRoles.length ? askedRoles : [r]) as RoleId[];
+      const cap = roleCapacity(c);
+      let current: RoleId[] = rolesOf(c).filter((x) => x !== 'rest');
+      if (wanted.includes('rest')) current = [];
+      const taken: RoleId[] = [];
+      const refused: RoleId[] = [];
+      for (const w of wanted) {
+        if (current.includes(w) || taken.includes(w)) continue;
+        if (w === 'rest') { taken.push(w); continue; }
+        if (current.length + taken.filter((t) => t !== 'rest').length >= cap) refused.push(w); else taken.push(w);
+      }
+      const all = (wanted.includes('rest') ? ['rest'] : [...current, ...taken]) as RoleId[];
+      const mainFit = roleFit(taken[0] || r, c);
+      res.assignment = all[0];
+      res.assignments = all;
+      const notes = [taken.length ? `Nhận việc: ${taken.map((x) => ROLES[x].label).join(', ')}.` : 'Việc này đã có trong danh sách của họ.', refused.length ? `Không nhận thêm: ${refused.map((x) => ROLES[x].label).join(', ')} (đã đủ ${cap} việc, ôm thêm sẽ làm hỏng hết).` : ''].filter(Boolean).join(' ');
+      res.reply = fill(pick(ASSIGN_REPLY[mainFit], rng), c, pr) + ` (${notes})`;
+      res.trustChange = mainFit === 'great' ? 3 : 1; res.moraleChange = mainFit === 'poor' ? -2 : 2 - Math.max(0, all.length - 2); res.mood = 'neutral';
       break;
     }
     case 'flirt': {
@@ -295,7 +358,7 @@ NHÂN VẬT CỦA BẠN:
 - Giới tính: ${c.gender === 'female' ? 'nữ' : 'nam'}, ${c.age} tuổi, nghề: ${c.role || 'người sống sót'}
 - Tính cách: ${c.personality || 'bình thường'}; đặc điểm: ${(c.traits || []).map((x) => TRAIT_LABEL[x] || x).join(', ') || 'chưa rõ'}; Tiểu sử: ${c.bio || ''}; Kỹ năng: ${(c.skills || []).join(', ')}
 - Tin cậy ${c.trust}/100, thiện cảm ${c.affection}/100, tinh thần ${c.morale}/100, quan hệ: ${c.intimacyLevel || 'stranger'}
-- Đang được giao việc: ${c.assignment || 'chưa'}; Bối cảnh: ngày ${req.context?.day ?? 1}, ${req.context?.zoneLabel || ''}, thời tiết ${req.context?.weather || ''}
+- Đang được giao việc: ${(c.assignments && c.assignments.length ? c.assignments.join(', ') : c.assignment) || 'chưa'}; ${req.context?.interview ? 'ĐÂY LÀ BUỔI PHỎNG VẤN: người chơi đang cân nhắc có nhận bạn vào nhóm hay không và chỉ hỏi vài câu. Trả lời thật theo tính cách; nếu bạn đang bị cắn/nhiễm hoặc tham lam/nhát gan thì có thể giấu hoặc nói giảm. ' : ''} Bối cảnh: ngày ${req.context?.day ?? 1}, ${req.context?.zoneLabel || ''}, thời tiết ${req.context?.weather || ''}
 
 NGƯỜI CHƠI: giới tính ${p.gender}; ${p.nameKnown ? `tên ${p.name}` : 'CHƯA ai biết tên người chơi'}.
 
@@ -323,7 +386,11 @@ export function sanitizeChat(parsed: any, req: ChatReq): ChatRes | null {
   let intimacy: string | undefined = levels.includes(parsed.intimacyLevel) ? parsed.intimacyLevel : undefined;
   if (!allow && (intimacy === 'romantic' || intimacy === 'soulmate')) intimacy = undefined; // luật khác giới
   const mood = ['warm', 'neutral', 'wary', 'upset', 'flirty', 'shy', 'sad'].includes(parsed.mood) ? parsed.mood : 'neutral';
-  const assignment = (Object.keys(ROLES) as RoleId[]).includes(parsed.assignment) ? parsed.assignment : undefined;
+  const validRole = (x: any): x is RoleId => ROLE_ORDER.includes(x);
+  const listed: RoleId[] = (Array.isArray(parsed.assignments) ? parsed.assignments : []).filter(validRole);
+  if (validRole(parsed.assignment) && !listed.includes(parsed.assignment)) listed.unshift(parsed.assignment);
+  const assignments = listed.length ? listed.slice(0, roleCapacity(req.companion)) : undefined;
+  const assignment = assignments ? assignments[0] : undefined;
   const wantsReveal = !!parsed.revealName && req.companion.nameKnown === false && req.companion.trust >= 35;
   return {
     reply: parsed.reply.trim(),
@@ -332,6 +399,6 @@ export function sanitizeChat(parsed: any, req: ChatReq): ChatRes | null {
     moraleChange: clamp(Number(parsed.moraleChange) || 0, -10, 10),
     sanityChange: clamp(Number(parsed.sanityChange) || 0, -5, 10),
     mood, intimacyLevel: intimacy, revealName: wantsReveal, asksPlayerName: !!parsed.asksPlayerName && !req.player.nameKnown,
-    assignment, romanceAllowed: allow, intent: 'ai',
+    assignment, assignments, romanceAllowed: allow, intent: 'ai',
   };
 }

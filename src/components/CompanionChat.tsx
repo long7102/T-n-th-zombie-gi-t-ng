@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Send, Heart, Shield, Smile, Loader2 } from 'lucide-react';
 import { Companion } from '../types/game';
-import { ROLES, RoleId, roleFit, TRAIT_LABEL } from '../data/companionChat';
+import { ROLES, RoleId, roleFit, roleAptitude, rolesOf, roleCapacity, TRAIT_LABEL } from '../data/companionChat';
 import { sound } from '../utils/audio';
 
 export interface ChatMsg {
@@ -17,26 +17,36 @@ interface Props {
   log: ChatMsg[];
   busy: boolean;
   askingName: boolean;
+  interviewLeft?: number; // chế độ phỏng vấn người vừa được cứu: số câu hỏi còn lại
   onSend: (text: string) => void;
   onSetRole: (role: RoleId) => void;
   onAnswerName: (name: string | null) => void;
   onClose: () => void;
 }
 
+const ROLE_BUTTONS: RoleId[] = ['guard', 'cook', 'scout', 'repair', 'medic', 'forage', 'rest'];
+
 const MOOD_LABEL = (aff: number) =>
   aff >= 85 ? 'Tri kỷ' : aff >= 70 ? 'Rung động' : aff >= 50 ? 'Gắn bó' : aff >= 30 ? 'Đồng hành' : 'Xa lạ';
 
-export const CompanionChat: React.FC<Props> = ({ companion, playerGender, playerNameKnown, log, busy, askingName, onSend, onSetRole, onAnswerName, onClose }) => {
+export const CompanionChat: React.FC<Props> = ({ companion, playerGender, playerNameKnown, log, busy, askingName, interviewLeft, onSend, onSetRole, onAnswerName, onClose }) => {
   const [text, setText] = useState('');
   const [nameInput, setNameInput] = useState('');
   const endRef = useRef<HTMLDivElement | null>(null);
-  const canRomance = (playerGender === 'male' || playerGender === 'female') && companion.gender !== playerGender;
+  const interview = interviewLeft !== undefined;
+  const canRomance = !interview && (playerGender === 'male' || playerGender === 'female') && companion.gender !== playerGender;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [log.length, busy]);
 
-  const chips = [
+  const chips = interview ? [
+    'Bạn có bị cắn hay bị thương chỗ nào không?',
+    'Bạn biết làm những gì?',
+    'Trước đây bạn làm nghề gì?',
+    'Tên bạn là gì?',
+    'Vì sao bạn ở một mình?',
+  ] : [
     'Cậu/cô có ổn không? Kể tôi nghe đi.',
     'Kể một chuyện vui đi, tôi muốn cười.',
     'Trước đây bạn làm nghề gì?',
@@ -48,7 +58,7 @@ export const CompanionChat: React.FC<Props> = ({ companion, playerGender, player
 
   const send = (t: string) => {
     const v = t.trim();
-    if (!v || busy) return;
+    if (!v || busy || (interview && (interviewLeft as number) <= 0)) return;
     sound.playClick();
     onSend(v);
     setText('');
@@ -80,30 +90,52 @@ export const CompanionChat: React.FC<Props> = ({ companion, playerGender, player
           </button>
         </div>
 
-        {/* Phân công */}
-        <div className="border-b border-neutral-800 bg-neutral-950/40 p-3">
-          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-neutral-400">Phân công (hiệu quả theo sở trường, có thể nói bằng lời)</div>
-          <div className="flex flex-wrap gap-1.5">
-            {(Object.keys(ROLES) as RoleId[]).filter((r) => r !== 'none').map((r) => {
-              const fit = roleFit(r, companion);
-              const active = (companion.assignment || 'none') === r;
-              return (
-                <button
-                  key={r}
-                  onClick={() => { sound.playClick(); onSetRole(active ? 'none' : r); }}
-                  title={ROLES[r].effect}
-                  className={`cursor-pointer rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${active ? 'border-amber-500 bg-amber-950/60 text-amber-200' : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-neutral-500'}`}
-                >
-                  {ROLES[r].label}
-                  {fit === 'great' && <span className="ml-1 text-emerald-400">★</span>}
-                </button>
-              );
-            })}
+        {interview && (
+          <div className="border-b border-neutral-800 bg-amber-950/20 px-4 py-2 text-[11px] text-amber-200">
+            Bạn đang cân nhắc có nhận người này vào nhóm không. Hỏi tối đa vài câu: còn <strong>{interviewLeft}</strong> câu. Họ có thể nói thật hoặc giấu bớt.
           </div>
-          {companion.assignment && companion.assignment !== 'none' && (
-            <div className="mt-1.5 text-[11px] text-neutral-400">Đang làm: <span className="text-amber-300">{ROLES[companion.assignment as RoleId]?.label}</span> · {ROLES[companion.assignment as RoleId]?.effect}</div>
-          )}
-        </div>
+        )}
+        {!interview && (() => {
+          const mine = rolesOf(companion);
+          const cap = roleCapacity(companion);
+          return (
+            <div className="border-b border-neutral-800 bg-neutral-950/40 p-3">
+              <div className="mb-1.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-neutral-400">
+                <span>Phân công nhiều việc (★ = đúng sở trường)</span>
+                <span className={mine.filter((r) => r !== 'rest').length >= cap ? 'text-amber-300' : ''}>{mine.filter((r) => r !== 'rest').length}/{cap} việc</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {ROLE_BUTTONS.map((r) => {
+                  const fit = roleFit(r, companion);
+                  const active = mine.includes(r);
+                  const apt = roleAptitude(r, companion as any);
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => { sound.playClick(); onSetRole(r); }}
+                      title={`${ROLES[r].effect}${apt < 0.95 ? ' · thể trạng làm việc này hơi kém' : apt > 1.05 ? ' · thể trạng hợp việc này' : ''}`}
+                      className={`cursor-pointer rounded border px-2.5 py-1 text-[11px] font-medium transition-colors ${active ? 'border-amber-500 bg-amber-950/60 text-amber-200' : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-neutral-500'}`}
+                    >
+                      {active ? '✓ ' : ''}{ROLES[r].label}
+                      {fit === 'great' && <span className="ml-1 text-emerald-400">★</span>}
+                      {apt < 0.95 && <span className="ml-1 text-red-400">▾</span>}
+                      {apt > 1.05 && <span className="ml-1 text-sky-400">▴</span>}
+                    </button>
+                  );
+                })}
+                {mine.length > 0 && (
+                  <button onClick={() => { sound.playClick(); onSetRole('none'); }} className="cursor-pointer rounded border border-neutral-800 px-2.5 py-1 text-[11px] text-neutral-500 hover:text-neutral-300">Bỏ hết</button>
+                )}
+              </div>
+              {mine.length > 0 && (
+                <div className="mt-1.5 text-[11px] text-neutral-400">
+                  Đang làm: <span className="text-amber-300">{mine.map((r) => ROLES[r].label).join(' · ')}</span>
+                  {mine.filter((r) => r !== 'rest').length > 1 && <span className="ml-1 text-neutral-500">(ôm nhiều việc thì mỗi việc kém đi và người đó mau mệt)</span>}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Hội thoại */}
         <div className="flex-1 space-y-2.5 overflow-y-auto p-3 sm:p-4">

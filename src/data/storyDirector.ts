@@ -407,7 +407,18 @@ function resolveAction(req: any, rng: Rng, setting: Setting, zone: Zone, turn: n
   // Người vừa được cứu: bạn quyết định nhận họ vào nhóm hay không
   if (sceneId === 'r_recruit_decision' && req.pendingRecruit) {
     const who = req.pendingRecruit;
-    const idx = RECRUIT_CHOICES.findIndex((c) => norm(c) === action);
+    let idx = RECRUIT_CHOICES.findIndex((c) => norm(c) === action);
+    // Tự gõ quyết định: nhận ra ý nhận / cho đồ rồi để đi / từ chối; câu khác thì vẫn giữ người đó đứng chờ
+    if (idx < 0) {
+      if (W('từ chối|không nhận|đuổi|không thể nuôi|cút').test(action.toLowerCase())) idx = 2;
+      else if (W('nhận|cho ở lại|đi cùng|ở lại cùng|đồng ý|vào nhóm|theo tôi').test(action.toLowerCase())) idx = 0;
+      else if (W('đưa|cho (họ|người)|để họ (đi|tự)|chỉ đường|tự tìm').test(action.toLowerCase())) idx = 1;
+    }
+    if (idx < 0) {
+      const talk = resolveCustom(req.chosenAction || '', inv, comps, rng, setting, zone, turn, req);
+      talk.pendingRecruit = who;
+      return talk;
+    }
     const r = blankRes('event', '');
     r.clearRecruit = true;
     r.deterministic = true;
@@ -697,7 +708,7 @@ function fromRoutineChoice(ch: RoutineChoice, inv: any[], comps: any[], sceneId:
     const type = (flags.find((f) => f.startsWith('raid_type_'))?.slice(10) as RaidType) || raidTypeFor(flags, req.day || 1);
     const res = resolveRaid(ch.raid, type, {
       base: req.base || {},
-      companions: comps.map((c: any) => ({ name: c.name, hp: c.hp ?? 100, status: c.status, assignment: c.assignment, traits: c.traits, role: c.role, skills: c.skills })),
+      companions: comps.map((c: any) => ({ name: c.name, hp: c.hp ?? 100, status: c.status, assignment: c.assignment, assignments: c.assignments, traits: c.traits, role: c.role, skills: c.skills })),
       inventory: inv,
       weaponDamage: req.player?.equippedWeapon?.damage || 0,
       flags, day: req.day || 1,

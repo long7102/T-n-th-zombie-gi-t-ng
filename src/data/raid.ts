@@ -36,7 +36,7 @@ export function attackStrength(type: RaidType, day: number, powerOn: boolean): n
   return 28 + day * 2.6 + bonus[type] + (powerOn ? 4 : 0); // máy phát ồn thu hút kẻ địch
 }
 
-export interface RaidCompanion { name: string; hp: number; status?: string; assignment?: string; traits?: string[]; role?: string; skills?: string[] }
+export interface RaidCompanion { name: string; hp: number; status?: string; assignment?: string; assignments?: string[]; traits?: string[]; role?: string; skills?: string[] }
 export interface RaidInput {
   base: { fortification?: number; modules?: Record<string, number>; warehouse?: Item[]; facilities?: { hasGeneratorAndFridge?: boolean } };
   companions: RaidCompanion[];
@@ -56,7 +56,7 @@ export function defenseScore(i: RaidInput): { score: number; parts: string[] } {
   const walls = m.walls || 0;
   if (walls) s += walls * 3;
   const alive = i.companions.filter((c) => c.status !== 'deceased' && c.hp >= 20);
-  const guards = alive.filter((c) => c.assignment === 'guard').length;
+  const guards = alive.filter((c) => (c.assignments && c.assignments.length ? c.assignments : [c.assignment]).includes('guard')).length;
   if (guards) { s += guards * 11; parts.push(`${guards} người canh gác`); }
   s += (alive.length - guards) * 3.5; // những người còn lại vẫn cầm vũ khí được
   if (alive.length) parts.push(`${alive.length} người chiến đấu được`);

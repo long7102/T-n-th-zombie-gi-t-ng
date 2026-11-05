@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { rolesOf, roleCapacity } from './data/companionChat';
 import {
   Heart,
   Droplet,
@@ -185,6 +186,8 @@ export default function App() {
   const [chatCompanionId, setChatCompanionId] = useState<string | null>(null);
   const [chatLogs, setChatLogs] = useState<Record<string, ChatMsg[]>>({});
   const [chatBusy, setChatBusy] = useState(false);
+  const [interviewOpen, setInterviewOpen] = useState(false);
+  const [interviewAsked, setInterviewAsked] = useState(0);
   const [nameAskId, setNameAskId] = useState<string | null>(null);
   const [teamLog, setTeamLog] = useState<string[]>([]);
 
@@ -750,7 +753,7 @@ export default function App() {
       });
 
       // Conditional Companion Recruitment: Only if specifically rescued
-      if ('pending_recruit' in data) setPendingRecruit(data.pending_recruit || null);
+      if ('pending_recruit' in data) { setPendingRecruit(data.pending_recruit || null); setInterviewAsked(0); setInterviewOpen(false); }
       if (data.newCompanion && !updatedCompanions.some((c) => c.id === data.newCompanion.id)) {
         updatedCompanions.push({ ...data.newCompanion, hasBeenRescued: true, joinedTurn: turnCount + 1 });
         setRecentCompanionBanner(data.newCompanion);
@@ -1307,8 +1310,19 @@ export default function App() {
   };
 
   // Giao việc cho đồng đội (từ giao diện hoặc từ lời nói trong khung chat)
+  // Bật/tắt từng việc. Một người nhận được nhiều việc cùng lúc, tối đa theo sức khỏe, tinh thần và kỹ năng.
   const handleSetRole = (companionId: string, role: RoleId) => {
-    setCompanions((prev) => prev.map((c) => (c.id === companionId ? { ...c, assignment: role === 'none' ? undefined : role } : c)));
+    setCompanions((prev) => prev.map((c) => {
+      if (c.id !== companionId) return c;
+      if (role === 'none') return { ...c, assignment: undefined, assignments: [] };
+      const cur = rolesOf(c).filter((r) => r !== 'rest');
+      let next: RoleId[];
+      if (role === 'rest') next = rolesOf(c).includes('rest') ? [] : ['rest'];
+      else if (cur.includes(role)) next = cur.filter((r) => r !== role);
+      else if (cur.length >= roleCapacity(c)) { setLootNotifications([`${c.name} chỉ gánh được tối đa ${roleCapacity(c)} việc cùng lúc.`]); return c; }
+      else next = [...cur, role];
+      return { ...c, assignment: next[0], assignments: next };
+    }));
   };
 
   // Gửi câu người chơi gõ cho đồng đội: AI (nếu còn khóa) hoặc engine offline trả lời, rồi cập nhật thiện cảm.
@@ -1343,7 +1357,8 @@ export default function App() {
             intimacyLevel: r.intimacyLevel || c.intimacyLevel,
             name: r.revealName && c.realName ? c.realName : c.name,
             nameKnown: r.revealName ? true : c.nameKnown,
-            assignment: r.assignment && r.assignment !== 'none' ? r.assignment : c.assignment,
+            assignment: r.assignments && r.assignments.length ? r.assignments[0] : r.assignment && r.assignment !== 'none' ? r.assignment : c.assignment,
+            assignments: r.assignments && r.assignments.length ? r.assignments : r.assignment && r.assignment !== 'none' ? Array.from(new Set([...rolesOf(c), r.assignment])).slice(0, roleCapacity(c)) : c.assignments,
             askedPlayerName: c.askedPlayerName || !!r.asksPlayerName,
             lastComment: r.reply,
           },
@@ -1363,6 +1378,40 @@ export default function App() {
       if (r.ai_note) setAiNote(r.ai_note);
     } catch {
       setChatLogs((prev) => ({ ...prev, [comp.id]: [...(prev[comp.id] || []), { from: 'system', text: 'Không kết nối được máy chủ, hãy thử lại.' }] }));
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  // Hỏi vài câu người vừa được cứu trước khi quyết định nhận (tối đa 3). Không đổi nhóm, chỉ đổi lòng tin của họ.
+  const INTERVIEW_MAX = 3;
+  const handleInterview = async (text: string) => {
+    const who = pendingRecruit;
+    if (!who || chatBusy || interviewAsked >= INTERVIEW_MAX) return;
+    const key = `recruit:${who.id}`;
+    const history = chatLogs[key] || [];
+    setChatLogs((prev) => ({ ...prev, [key]: [...history, { from: 'player', text }] }));
+    setInterviewAsked((n) => n + 1);
+    setChatBusy(true);
+    try {
+      const res = await fetch('/api/companion/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companion: who,
+          player: { gender: player.gender, name: player.name, nameKnown: player.nameKnown !== false, sanity: player.stats.sanity },
+          text,
+          history: history.filter((m) => m.from !== 'system').slice(-6),
+          context: { day, zoneLabel: location, weather, hasBase: base.hasBase, safe: base.hasBase, interview: true },
+          askedName: false,
+        }),
+      });
+      const r = await res.json();
+      const clamp = (n: number) => Math.max(0, Math.min(100, n));
+      setPendingRecruit((p) => (p ? { ...p, trust: clamp(p.trust + (r.trustChange || 0)), affection: clamp((p.affection || 0) + (r.affectionChange || 0)), name: r.revealName && p.realName ? p.realName : p.name, nameKnown: r.revealName ? true : p.nameKnown, lastComment: r.reply } : p));
+      setChatLogs((prev) => ({ ...prev, [key]: [...(prev[key] || []), { from: 'npc', text: r.reply, delta: { aff: r.affectionChange, trust: r.trustChange } }] }));
+    } catch {
+      setChatLogs((prev) => ({ ...prev, [key]: [...(prev[key] || []), { from: 'system', text: 'Không kết nối được máy chủ, hãy thử lại.' }] }));
     } finally {
       setChatBusy(false);
     }
@@ -2039,6 +2088,17 @@ export default function App() {
                 )}
               </div>
 
+              {pendingRecruit && currentTurn?.scene_id === 'r_recruit_decision' && (
+                <button
+                  onClick={() => { sound.playClick(); setInterviewOpen(true); }}
+                  disabled={isAiProcessing}
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border border-amber-700/70 bg-amber-950/30 p-3 text-left transition-colors hover:bg-amber-900/40 disabled:opacity-50"
+                >
+                  <span className="text-sm text-amber-100">Hỏi {pendingRecruit.name} vài câu trước khi quyết định (hỏi nghề, vết thương, kỹ năng, lý do ở một mình...)</span>
+                  <span className="shrink-0 font-mono text-xs text-amber-300">còn {Math.max(0, INTERVIEW_MAX - interviewAsked)} câu</span>
+                </button>
+              )}
+
               {/* 3 AI Suggested Choices */}
               <div className="grid grid-cols-1 gap-2.5">
                 {currentTurn?.choices?.map((choiceText, idx) => (
@@ -2201,6 +2261,22 @@ export default function App() {
           crewAvailable={companions.filter((c) => c.status !== 'deceased' && c.hp >= 25).length}
           onTravel={handleTravelFromMap}
           onClose={() => setShowMapModal(false)}
+        />
+      )}
+
+      {interviewOpen && pendingRecruit && (
+        <CompanionChat
+          companion={pendingRecruit}
+          playerGender={player.gender}
+          playerNameKnown={player.nameKnown !== false}
+          log={chatLogs[`recruit:${pendingRecruit.id}`] || []}
+          busy={chatBusy}
+          askingName={false}
+          interviewLeft={Math.max(0, INTERVIEW_MAX - interviewAsked)}
+          onSend={handleInterview}
+          onSetRole={() => {}}
+          onAnswerName={() => {}}
+          onClose={() => setInterviewOpen(false)}
         />
       )}
 

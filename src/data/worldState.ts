@@ -89,7 +89,7 @@ export function buildWorldSummary(w: WorldInput): WorldSummary {
     w.base.hasBase ? `Căn cứ: ${w.base.name}, kiên cố ${w.base.fortification}%, nhiên liệu ${w.base.fuel || 0}${mods.length ? `, công trình: ${mods.join(', ')}` : ''}.` : 'Chưa có căn cứ cố định.',
     `Tài nguyên: ba lô ${food} thức ăn, ${water} nước, ${meds} y tế, ${fuel} nhiên liệu; kho căn cứ ${whFood} thức ăn.`,
     w.vehicle ? `Phương tiện: ${VEHICLES[w.vehicle.kind].name}, xăng ${Math.round(w.vehicle.fuel)}, độ bền ${Math.round(w.vehicle.condition)}%.` : 'Chưa có phương tiện.',
-    alive.length ? `Đồng đội (${alive.length}): ${alive.map((c) => `${dn(c)} (tin ${c.trust}, thiện cảm ${c.affection || 0}${c.assignment ? `, làm ${c.assignment}` : ''})`).join('; ')}.` : 'Không có đồng đội.',
+    alive.length ? `Đồng đội (${alive.length}): ${alive.map((c) => `${dn(c)} (tin ${c.trust}, thiện cảm ${c.affection || 0}${(c.assignments && c.assignments.length) || c.assignment ? `, làm ${((c.assignments && c.assignments.length ? c.assignments : [c.assignment]) as string[]).join('+')}` : ''})`).join('; ')}.` : 'Không có đồng đội.',
     dead.length ? `Đã mất: ${dead.map(dn).join(', ')}.` : '',
     rivals && rivals.tone !== 'unknown' ? `Quan hệ với nhóm đối thủ: ${rivals.standing}. Hai bên tranh giành tài nguyên, lựa chọn khó khăn sẽ ngày càng nhiều.` : 'Chưa chạm trán nhóm người sống sót đối thủ nào.',
     ...w.log.filter((e) => e.kind === 'survival' || e.kind === 'relation').slice(-4).map((e) => `Ngày ${e.day}: ${e.text}`),

@@ -139,10 +139,10 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
                     key={item.id}
                     onClick={() => { sound.playClick(); setSelectedId(item.id); }}
                     title={item.name}
-                    className={`relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border bg-neutral-950/70 p-1 transition-all hover:bg-neutral-800/80 ${RARITY_RING[item.rarity] || RARITY_RING.common} ${active ? 'ring-2 ring-amber-400' : ''} ${spoiled ? 'bg-red-950/30' : ''}`}
+                    className={`twm-cell relative flex aspect-square cursor-pointer flex-col items-center justify-center border p-1 transition-all hover:brightness-125 ${RARITY_RING[item.rarity] || RARITY_RING.common} ${active ? 'ring-2 ring-amber-400' : ''} ${spoiled ? 'bg-red-950/30' : ''}`}
                   >
-                    <span className="text-2xl leading-none sm:text-3xl">{itemIcon(item)}</span>
-                    <span className="mt-1 line-clamp-2 w-full text-center text-[9px] leading-tight text-neutral-300 sm:text-[10px]">{item.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}</span>
+                    <span className="twm-ink text-2xl leading-none sm:text-3xl">{itemIcon(item)}</span>
+                    <span className="twm-type mt-1 line-clamp-2 w-full text-center text-[9px] leading-tight text-neutral-300 sm:text-[10px]">{item.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}</span>
                     <span className="absolute right-1 top-1 rounded bg-black/70 px-1 font-mono text-[10px] font-bold text-amber-400">{fmtQty(item)}</span>
                     {isEquipped(item) && <span className="absolute left-1 top-1 rounded bg-red-700 px-1 text-[8px] font-bold text-white">ĐANG DÙNG</span>}
                     {fresh && (
@@ -168,9 +168,9 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
             ) : (
               <div className="space-y-3">
                 <div className="flex items-start gap-3">
-                  <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border bg-neutral-950 text-3xl ${RARITY_RING[selected.rarity] || RARITY_RING.common}`}>{itemIcon(selected)}</div>
+                  <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border twm-cell text-3xl ${RARITY_RING[selected.rarity] || RARITY_RING.common}`}><span className="twm-ink">{itemIcon(selected)}</span></div>
                   <div className="min-w-0">
-                    <h4 className="text-sm font-bold leading-tight text-white">{selected.name}</h4>
+                    <h4 className="twm-type text-sm font-bold leading-tight text-white">{selected.name}</h4>
                     <div className={`mt-0.5 font-mono text-[10px] uppercase ${RARITY_TEXT[selected.rarity] || RARITY_TEXT.common}`}>
                       {RARITY_NAME[selected.rarity] || 'Thường'} · {CATEGORY_LABEL[selected.category] || selected.category} · {fmtQty(selected)}
                     </div>
