@@ -52,10 +52,12 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
   const reg = useMemo(() => Object.fromEntries(allNodes.map((n) => [n.id, n])) as Record<string, WorldNode>, [allNodes]);
   const visible = useMemo(() => revealedNodes(visitedNodes, extraNodes), [visitedNodes, extraNodes]);
   const known = useMemo(() => knownNodes(visitedNodes, extraNodes), [visitedNodes, extraNodes]);
-  const home = NODE_BY_ID[HOME_NODE_ID];
+  // Điểm xuất phát của mọi chuyến đi là căn cứ hiện tại (nếu đã chuyển căn cứ) hoặc chỗ ở ban đầu
+  const originId = baseNodeId && reg[baseNodeId] ? baseNodeId : HOME_NODE_ID;
+  const home = reg[originId] || NODE_BY_ID[HOME_NODE_ID];
 
   const selected = selectedId ? reg[selectedId] : null;
-  const path = useMemo(() => (selected ? shortestPath(HOME_NODE_ID, selected.id, extraNodes) : []), [selected, extraNodes]);
+  const path = useMemo(() => (selected ? shortestPath(originId, selected.id, extraNodes) : []), [selected, extraNodes, originId]);
   const hops = Math.max(0, path.length - 1);
   const pathEdges = new Set(path.slice(1).map((id, i) => [path[i], id].sort().join('|')));
 
@@ -184,7 +186,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
               {allNodes.map((n) => {
                 if (!visible.has(n.id)) return null;
                 const isKnown = known.has(n.id);
-                const isHome = n.id === HOME_NODE_ID;
+                const isHome = n.id === originId;
                 const isSel = n.id === selectedId;
                 const wasVisited = visitedNodes.includes(n.id);
                 const color = isHome ? '#38bdf8' : isKnown ? dangerColor(n.danger) : '#52605b';
@@ -257,7 +259,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
-                <PlaceIllustration kind={selected.kind} danger={selected.danger} known={known.has(selected.id)} seed={selected.id} />
+                <PlaceIllustration kind={selected.kind} danger={selected.danger} known={known.has(selected.id)} seed={selected.id} variant={selected.id} />
                 <div>
                   <div className="text-[10px] font-mono uppercase tracking-wider text-sky-400">{REGION_LABEL[selected.region]}</div>
                   <h4 className="text-sm font-bold text-white">
@@ -271,7 +273,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                     <span>
                       Bạn mới chỉ thấy tín hiệu mờ ở hướng này. Hãy ghé một điểm kề nó (
                       {selected.connections
-                        .filter((c) => known.has(c) && c !== HOME_NODE_ID)
+                        .filter((c) => known.has(c) && c !== originId)
                         .map((c) => reg[c]?.name.split(' - ')[0])
                         .join(', ') || 'điểm gần hơn'}
                       ) để khám phá.
@@ -308,7 +310,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                       {visits > 0 && <div className="mt-1 text-[10px] text-amber-400">Đã ghé {visits} lần nên vật tư còn ít hơn.</div>}
                     </div>
 
-                    {baseInfoOf(selected) && (() => { const info = baseInfoOf(selected)!; return (
+                    {selected.id !== originId && baseInfoOf(selected) && (() => { const info = baseInfoOf(selected)!; return (
                       <div className="space-y-2 rounded-lg border border-amber-800/60 bg-amber-950/20 p-3">
                         <div className="flex items-center justify-between text-[11px] font-mono text-amber-300">
                           <span>{selected.outpost ? 'CỨ ĐIỂM TIỀM NĂNG' : 'CÓ THỂ LẬP CĂN CỨ'}</span>
@@ -320,11 +322,16 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                         {Object.keys(info.bonus).length > 0 && <div className="text-[10px] text-neutral-400">Có sẵn công trình khi chiếm: {Object.entries(info.bonus).map(([k, v]) => `${k} cấp ${v}`).join(', ')}</div>}
                         {onClaimBase && (
                           <button
-                            disabled={visits === 0 || baseNodeId === selected.id}
-                            onClick={() => { sound.playLoot(); onClaimBase(selected); }}
+                            disabled={(visits === 0 && selected.id !== HOME_NODE_ID) || baseNodeId === selected.id}
+                            onClick={() => {
+                              const moving = hasBase;
+                              if (moving && !window.confirm(`Chuyển căn cứ tới ${selected.name.split(' - ')[0]}?\n\n- Đồ trong kho căn cứ được mang theo.\n- Công trình đã xây và các việc gia cố ở chỗ cũ sẽ mất.\n- Bạn mất sức vì dọn đồ và đi lại, đồng đội đi cùng.\n- Nơi ở đổi theo chỗ mới.`)) return;
+                              sound.playLoot();
+                              onClaimBase(selected);
+                            }}
                             className="w-full cursor-pointer rounded border border-amber-600 bg-amber-700/70 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            {baseNodeId === selected.id ? 'Đang là căn cứ của bạn' : visits === 0 ? 'Hãy tới lục soát một lần trước khi chiếm' : hasBase ? 'Chuyển căn cứ tới đây' : 'Chiếm làm căn cứ'}
+                            {baseNodeId === selected.id ? 'Đang là căn cứ của bạn' : visits === 0 && selected.id !== HOME_NODE_ID ? 'Hãy tới lục soát một lần trước khi chiếm' : hasBase ? 'Chuyển căn cứ tới đây' : 'Chiếm làm căn cứ'}
                           </button>
                         )}
                       </div>

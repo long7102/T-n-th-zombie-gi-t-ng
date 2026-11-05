@@ -59,9 +59,22 @@ const BASE_BY_KIND: Partial<Record<NodeKind, { score: number; kind: OutpostInfo[
   fuel_station: { score: 30, kind: 'Nomad', pros: ['Có thể còn nhiên liệu'], cons: ['Dễ cháy nổ, trống trải'] },
 };
 
+// Chuyển căn cứ tới một điểm thì môi trường quanh bạn đổi theo loại công trình (nhà cửa, trạm y tế, kho siêu thị...).
+export function settingForKind(kind: NodeKind, fallback = 'apartment_survivors'): string {
+  switch (kind) {
+    case 'hospital': return 'clinic_containment';
+    case 'supermarket': case 'market': case 'coldstorage': case 'hardware_store': case 'pharmacy': case 'industrial': case 'police_station': case 'depot': return 'supermarket_lockdown';
+    case 'farm': case 'church': case 'school': return 'private_house';
+    case 'tower': return 'apartment_survivors';
+    case 'stadium': return 'metro_train_derailment';
+    case 'bridge': case 'fuel_station': return 'highway_traffic_breakdown';
+    default: return fallback;
+  }
+}
+
 export function baseInfoOf(node: WorldNode): OutpostInfo | null {
   if (node.outpost) return node.outpost;
-  if (node.id === 'home') return null;
+  if (node.id === 'home') return { baseScore: 60, baseKind: 'Apartment', pros: ['Chỗ quen thuộc, biết rõ từng ngóc ngách'], cons: ['Đã bị kẻ khác để mắt tới'], bonus: {}, baseName: 'Căn cứ cũ' };
   const b = BASE_BY_KIND[node.kind];
   if (!b) return null;
   return { baseScore: b.score, baseKind: b.kind, pros: b.pros, cons: b.cons, bonus: b.bonus || {}, baseName: `Căn cứ ${node.name.split(' - ')[0]}` };

@@ -49,7 +49,7 @@ check(hpYes > hpNo, 'mặc đủ trang bị thì mất ít máu hơn: ' + hpNo +
 const hosp = WORLD_NODES.find((n) => n.kind === 'hospital')!;
 check(!!baseInfoOf(hosp) && baseInfoOf(hosp)!.baseScore > 0, 'bệnh viện lập căn cứ được dù không phải cứ điểm ngẫu nhiên');
 check(WORLD_NODES.filter((n) => n.id !== 'home').every((n) => !!baseInfoOf(n)), 'mọi điểm trên bản đồ đều có thông tin căn cứ');
-check(baseInfoOf(WORLD_NODES.find((n) => n.id === 'home')!) === null, 'chỗ ở hiện tại không tính là điểm để chuyển');
+check(!!baseInfoOf(WORLD_NODES.find((n) => n.id === 'home')!), 'chỗ ở ban đầu cũng có thể quay lại làm căn cứ');
 
 // 5) Cảnh ấm áp xuất hiện khi có đồng đội
 const comp = (n: string, trust = 60, morale = 50) => ({ id: n, name: n, gender: 'female', age: 28, hp: 80, maxHp: 100, morale, trust, affection: 40, status: 'healthy', traits: [], intimacyLevel: 'friend' });

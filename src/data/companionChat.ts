@@ -78,7 +78,7 @@ export interface ChatPlayer { gender: 'male' | 'female' | 'other'; name?: string
 export interface ChatReq {
   companion: ChatCompanion; player: ChatPlayer; text: string;
   history?: { from: 'player' | 'npc'; text: string }[];
-  context?: { day?: number; zoneLabel?: string; weather?: string; hasBase?: boolean; safe?: boolean; interview?: boolean };
+  context?: { day?: number; zoneLabel?: string; weather?: string; hasBase?: boolean; safe?: boolean; interview?: boolean; needs?: { hunger: number; thirst: number; stamina: number; sanity: number }; wounded?: boolean; recent?: string[] };
   askedName?: boolean;
 }
 export interface ChatRes {
@@ -340,7 +340,7 @@ export function offlineChat(req: ChatReq, rng: Rng = Math.random): ChatRes {
   // Làm câu trả lời có hồn: cử chỉ, đáp lại điều bạn vừa nói, nhận xét theo hoàn cảnh, hỏi lại đời thường
   res.reply = humanize({
     reply: res.reply, text: req.text, intent, mood: res.mood as any, tier: tr, traits: c.traits || [], affection: c.affection,
-    role: c.role, history: req.history || [], context: req.context, fill: (t) => fill(t, c, pr), rng,
+    role: c.role, history: req.history || [], context: req.context, fill: (t) => fill(t, c, pr), rng, age: c.age, gender: c.gender,
   });
   // Cập nhật mức quan hệ theo thiện cảm sau lượt này (không tự lên "romantic" nếu chưa tỏ tình)
   const aff = c.affection + res.affectionChange;
@@ -365,7 +365,7 @@ NHÂN VẬT CỦA BẠN:
 - Giới tính: ${c.gender === 'female' ? 'nữ' : 'nam'}, ${c.age} tuổi, nghề: ${c.role || 'người sống sót'}
 - Tính cách: ${c.personality || 'bình thường'}; đặc điểm: ${(c.traits || []).map((x) => TRAIT_LABEL[x] || x).join(', ') || 'chưa rõ'}; Tiểu sử: ${c.bio || ''}; Kỹ năng: ${(c.skills || []).join(', ')}
 - Tin cậy ${c.trust}/100, thiện cảm ${c.affection}/100, tinh thần ${c.morale}/100, quan hệ: ${c.intimacyLevel || 'stranger'}
-- Đang được giao việc: ${(c.assignments && c.assignments.length ? c.assignments.join(', ') : c.assignment) || 'chưa'}; ${req.context?.interview ? 'ĐÂY LÀ BUỔI PHỎNG VẤN: người chơi đang cân nhắc có nhận bạn vào nhóm hay không và chỉ hỏi vài câu. Trả lời thật theo tính cách; nếu bạn đang bị cắn/nhiễm hoặc tham lam/nhát gan thì có thể giấu hoặc nói giảm. ' : ''} Bối cảnh: ngày ${req.context?.day ?? 1}, ${req.context?.zoneLabel || ''}, thời tiết ${req.context?.weather || ''}
+- Đang được giao việc: ${(c.assignments && c.assignments.length ? c.assignments.join(', ') : c.assignment) || 'chưa'}; ${req.context?.needs ? `Tình trạng người chơi: đói ${req.context.needs.hunger}, khát ${req.context.needs.thirst}, thể lực ${req.context.needs.stamina}, tinh thần ${req.context.needs.sanity}${req.context.wounded ? ', đang bị thương' : ''}. ` : ''}${req.context?.recent?.length ? `Chuyện vừa xảy ra trong nhóm: ${req.context.recent.join(' | ')}. ` : ''}${req.context?.interview ? 'ĐÂY LÀ BUỔI PHỎNG VẤN: người chơi đang cân nhắc có nhận bạn vào nhóm hay không và chỉ hỏi vài câu. Trả lời thật theo tính cách; nếu bạn đang bị cắn/nhiễm hoặc tham lam/nhát gan thì có thể giấu hoặc nói giảm. ' : ''} Bối cảnh: ngày ${req.context?.day ?? 1}, ${req.context?.zoneLabel || ''}, thời tiết ${req.context?.weather || ''}
 
 NGƯỜI CHƠI: giới tính ${p.gender}; ${p.nameKnown ? `tên ${p.name}` : 'CHƯA ai biết tên người chơi'}.
 

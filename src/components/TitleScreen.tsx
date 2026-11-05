@@ -136,18 +136,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             </button>
           )}
 
-          {onOpenChronicle && (
-            <button
-              onClick={() => {
-                sound.playClick();
-                onOpenChronicle();
-              }}
-              className="flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3.5 bg-neutral-900/90 hover:bg-neutral-800 text-neutral-300 border border-neutral-700/80 hover:border-neutral-500 rounded-lg transition-colors cursor-pointer text-sm font-medium"
-            >
-              <BookOpen className="w-4 h-4 text-amber-400" />
-              <span>Cây Cốt Truyện 5 Phân Nhánh</span>
-            </button>
-          )}
         </div>
 
         {/* Feature Category Switcher */}

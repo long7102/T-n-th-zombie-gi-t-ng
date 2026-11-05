@@ -63,7 +63,7 @@ check(/THẤT BẠI/.test(noGun.outcome), 'dùng súng khi không có phải th�
 const near = await turn('[MAP_TRAVEL] node=pharmacy style=quick hops=1 visits=0 :: Đi quầy thuốc');
 check(/quầy thuốc|Quầy Thuốc/i.test(near.outcome), 'kết quả di chuyển phải nhắc tên địa điểm');
 const far = await turn('[MAP_TRAVEL] node=tower style=thorough hops=2 visits=0 :: Đi tòa tháp');
-check(far.statChanges.stamina <= -15, 'đi xa phải tốn nhiều thể lực hơn');
+check(/trọn một ngày/.test(far.outcome) && /nửa ngày/.test(near.outcome), 'đi xa mất cả ngày, đi gần mất nửa ngày');
 
 // 3) Hạng mục radio hợp lệ
 check(radios > 5, 'phải có nhiều bản tin radio qua các ngày');
