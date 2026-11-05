@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Navigation, Clock, ShieldAlert, X, Footprints, Eye, Lock } from 'lucide-react';
 import { WeatherType } from '../types/game';
-import { HOME_NODE_ID, KIND_ICON, NODE_BY_ID, REGION_LABEL, RING_RX, RING_Y_RATIO, WORLD_NODES, WorldNode, knownNodes, revealedNodes, shortestPath } from '../data/worldMap';
+import { HOME_NODE_ID, KIND_ICON, NODE_BY_ID, REGION_LABEL, RING_RX, RING_Y_RATIO, WORLD_NODES, WorldNode, baseInfoOf, knownNodes, revealedNodes, shortestPath } from '../data/worldMap';
 import { sound } from '../utils/audio';
+import { PlaceIllustration } from './PlaceIllustration';
 import { Vehicle, VEHICLES, fuelNeededRoundTrip } from '../data/vehicles';
 
 interface DynamicMapModalProps {
@@ -256,6 +257,7 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
               </div>
             ) : (
               <div className="space-y-3">
+                <PlaceIllustration kind={selected.kind} danger={selected.danger} known={known.has(selected.id)} seed={selected.id} />
                 <div>
                   <div className="text-[10px] font-mono uppercase tracking-wider text-sky-400">{REGION_LABEL[selected.region]}</div>
                   <h4 className="text-sm font-bold text-white">
@@ -306,16 +308,16 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                       {visits > 0 && <div className="mt-1 text-[10px] text-amber-400">Đã ghé {visits} lần nên vật tư còn ít hơn.</div>}
                     </div>
 
-                    {selected.outpost && (
+                    {baseInfoOf(selected) && (() => { const info = baseInfoOf(selected)!; return (
                       <div className="space-y-2 rounded-lg border border-amber-800/60 bg-amber-950/20 p-3">
                         <div className="flex items-center justify-between text-[11px] font-mono text-amber-300">
-                          <span>CỨ ĐIỂM TIỀM NĂNG</span>
-                          <span>Độ phù hợp làm căn cứ: {selected.outpost.baseScore}/100</span>
+                          <span>{selected.outpost ? 'CỨ ĐIỂM TIỀM NĂNG' : 'CÓ THỂ LẬP CĂN CỨ'}</span>
+                          <span>Độ phù hợp: {info.baseScore}/100</span>
                         </div>
-                        <div className="h-1.5 overflow-hidden rounded bg-neutral-900"><div className="h-full bg-amber-500" style={{ width: `${selected.outpost.baseScore}%` }} /></div>
-                        <ul className="space-y-0.5 text-[11px] text-emerald-300">{selected.outpost.pros.map((p) => (<li key={p}>＋ {p}</li>))}</ul>
-                        <ul className="space-y-0.5 text-[11px] text-red-300">{selected.outpost.cons.map((p) => (<li key={p}>－ {p}</li>))}</ul>
-                        {Object.keys(selected.outpost.bonus).length > 0 && <div className="text-[10px] text-neutral-400">Có sẵn công trình khi chiếm: {Object.entries(selected.outpost.bonus).map(([k, v]) => `${k} cấp ${v}`).join(', ')}</div>}
+                        <div className="h-1.5 overflow-hidden rounded bg-neutral-900"><div className="h-full bg-amber-500" style={{ width: `${info.baseScore}%` }} /></div>
+                        <ul className="space-y-0.5 text-[11px] text-emerald-300">{info.pros.map((p) => (<li key={p}>＋ {p}</li>))}</ul>
+                        <ul className="space-y-0.5 text-[11px] text-red-300">{info.cons.map((p) => (<li key={p}>－ {p}</li>))}</ul>
+                        {Object.keys(info.bonus).length > 0 && <div className="text-[10px] text-neutral-400">Có sẵn công trình khi chiếm: {Object.entries(info.bonus).map(([k, v]) => `${k} cấp ${v}`).join(', ')}</div>}
                         {onClaimBase && (
                           <button
                             disabled={visits === 0 || baseNodeId === selected.id}
@@ -326,7 +328,9 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                           </button>
                         )}
                       </div>
-                    )}
+                    ); })()}
+
+                    <div className="rounded border border-neutral-800 bg-neutral-950/60 p-2 text-[10px] leading-relaxed text-neutral-400">Đi loot là mất cả buổi: trong lúc bạn vắng, căn cứ tạm ngừng hoạt động (bếp, vườn, việc của đồng đội) cho tới khi bạn trở về.</div>
 
                     {(vehicle || selected.needsVehicle) && (
                       <div className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/20 p-3 text-[11px]">

@@ -9,6 +9,8 @@
 type Rng = () => number;
 
 export type Mood = 'warm' | 'neutral' | 'wary' | 'upset' | 'flirty' | 'shy' | 'sad';
+import { humanize } from './companionVoice';
+
 export type RoleId = 'guard' | 'cook' | 'scout' | 'repair' | 'medic' | 'forage' | 'rest' | 'none';
 
 export const ROLES: Record<RoleId, { label: string; words: RegExp; skills: RegExp; effect: string }> = {
@@ -335,6 +337,11 @@ export function offlineChat(req: ChatReq, rng: Rng = Math.random): ChatRes {
     res.asksPlayerName = true;
     res.reply += ` ${fill('À, còn {you}? Cho tới giờ {me} vẫn chưa biết nên gọi {you} thế nào.', c, pr)}`;
   }
+  // Làm câu trả lời có hồn: cử chỉ, đáp lại điều bạn vừa nói, nhận xét theo hoàn cảnh, hỏi lại đời thường
+  res.reply = humanize({
+    reply: res.reply, text: req.text, intent, mood: res.mood as any, tier: tr, traits: c.traits || [], affection: c.affection,
+    role: c.role, history: req.history || [], context: req.context, fill: (t) => fill(t, c, pr), rng,
+  });
   // Cập nhật mức quan hệ theo thiện cảm sau lượt này (không tự lên "romantic" nếu chưa tỏ tình)
   const aff = c.affection + res.affectionChange;
   if (!res.intimacyLevel) {
@@ -367,7 +374,7 @@ LUẬT:
 2. Quan hệ tình cảm/thân mật CHỈ giữa hai người trưởng thành KHÁC GIỚI. ${allow ? 'Hai người được phép phát triển tình cảm nếu đủ tin cậy và đồng thuận; cảnh thân mật phải lãng mạn, giàu cảm xúc (ánh nến, hơi ấm, nụ hôn, lời thì thầm) nhưng kín đáo, chuyển cảnh nhẹ nhàng sang sáng hôm sau, tuyệt đối không miêu tả chi tiết tình dục.' : 'Hai người KHÔNG được phép có quan hệ tình cảm/thân mật: từ chối khéo, nhẹ nhàng, giữ tình đồng đội.'}
 3. Nếu bị ép buộc, xúc phạm, nài nỉ khi chưa sẵn sàng: nhân vật từ chối thẳng, giảm tin cậy và thiện cảm.
 4. Chỉ nói tên thật khi tin cậy >= 35 và người chơi hỏi tên; nếu nói thì revealName = true. Nếu đã biết tên nhau mà người chơi chưa nói tên: có thể hỏi tên người chơi (asksPlayerName = true).
-5. Nếu người chơi giao việc (canh gác, nấu ăn, trinh sát, sửa chữa, y tế, kiếm đồ ăn, nghỉ ngơi), trả lời theo khả năng thật của nhân vật và đặt assignment tương ứng (guard|cook|scout|repair|medic|forage|rest).
+5. Hãy nói như một con người thật chứ không như máy: có cử chỉ trong *...*, có ngập ngừng, thi thoảng hỏi lại người chơi một câu đời thường, nhớ những gì vừa nói trong lịch sử, không lặp lại câu cũ, phản ứng theo tính cách và hoàn cảnh (thời tiết, ngày, đói mệt). Nếu người chơi giao việc (canh gác, nấu ăn, trinh sát, sửa chữa, y tế, kiếm đồ ăn, nghỉ ngơi), trả lời theo khả năng thật của nhân vật và đặt assignment tương ứng (guard|cook|scout|repair|medic|forage|rest).
 6. Các thay đổi chỉ số nhỏ và hợp lý: affectionChange, trustChange, moraleChange trong -10..10; sanityChange (của người chơi) trong -5..10.
 
 Lịch sử gần đây:

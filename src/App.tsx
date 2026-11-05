@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { slotOf, Slot } from './data/equipment';
 import { rolesOf, roleCapacity } from './data/companionChat';
 import {
   Heart,
@@ -68,9 +69,11 @@ import { CompanionChat, ChatMsg } from './components/CompanionChat';
 import { computeTeamEffects } from './utils/teamEffects';
 import type { RoleId } from './data/companionChat';
 import { SceneIllustration } from './components/SceneIllustration';
-import { encodeMapAction, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
+import { encodeMapAction, decodeMapAction, baseInfoOf, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
 import { BaseHub } from './components/BaseHub';
 import { rq, addQty, fmtNamed, servingOf } from './data/units';
+import { NeedToast, NeedAlert } from './components/NeedToast';
+import { NEED_ALERT_AT, pickFood, pickWater } from './utils/needs';
 import { FORTIFY_ACTIONS } from './utils/baseSystem';
 import { tickBase, payCost, MODULE_BY_ID, SHELTER_SUITABILITY, applyBaseDelta } from './utils/baseSystem';
 import { exposureOf } from './data/raid';
@@ -187,6 +190,7 @@ export default function App() {
   const [chatLogs, setChatLogs] = useState<Record<string, ChatMsg[]>>({});
   const [chatBusy, setChatBusy] = useState(false);
   const [interviewOpen, setInterviewOpen] = useState(false);
+  const [needDismissed, setNeedDismissed] = useState<{ hunger: boolean; thirst: boolean }>({ hunger: false, thirst: false });
   const [interviewAsked, setInterviewAsked] = useState(0);
   const [nameAskId, setNameAskId] = useState<string | null>(null);
   const [teamLog, setTeamLog] = useState<string[]>([]);
@@ -348,6 +352,15 @@ export default function App() {
       default: return <Sun className="w-3.5 h-3.5 text-yellow-400" />;
     }
   };
+
+  // Khi chỉ số đã hạ xuống dưới 70 thì lần sau vượt 75 sẽ nhắc lại
+  useEffect(() => {
+    setNeedDismissed((d) => {
+      const h = player.stats.hunger < 70 ? false : d.hunger;
+      const t = player.stats.thirst < 70 ? false : d.thirst;
+      return h === d.hunger && t === d.thirst ? d : { hunger: h, thirst: t };
+    });
+  }, [player.stats.hunger, player.stats.thirst]);
 
   // Start new game after character creation
   const handleCharacterCreated = async (
@@ -583,8 +596,11 @@ export default function App() {
         infectionPenalty = 5;
       }
 
-      const team = computeTeamEffects(companions, base.hasBase, currentWound.hasOpenWound, worldFlags);
-      const bt = tickBase(base, (data.weather || weather) as WeatherType, turnCount + 1);
+      // Đi loot xa hoặc đang ở ngoài: căn cứ tạm ngừng hoạt động (bếp nguội, vườn không ai chăm, đồng đội chỉ trông nhà) cho tới khi bạn về
+      const awayFromBase = !!decodeMapAction(action) || data.zone === 'outside';
+      const emptyTeam = { sanity: 0, hunger: 0, infection: 0, fortification: 0, loot: [] as Item[], log: awayFromBase && base.hasBase ? ['Bạn đang đi vắng nên căn cứ tạm ngừng hoạt động: bếp nguội, vườn không ai chăm, mọi người chỉ trông nhà.'] : [], companionDelta: {} as Record<string, { morale?: number; hp?: number }> };
+      const team = awayFromBase ? emptyTeam : computeTeamEffects(companions, base.hasBase, currentWound.hasOpenWound, worldFlags);
+      const bt = awayFromBase ? { base, log: [] as string[], sanity: 0, infection: 0, danger: 0, loopStatus: {} as Record<string, 'ok' | 'starved' | 'off'> } : tickBase(base, (data.weather || weather) as WeatherType, turnCount + 1);
       const effectiveMaxHp = lockedMaxHp || player.stats.maxHp;
       const nextHp = Math.max(0, Math.min(effectiveMaxHp, player.stats.hp + (data.statChanges?.hp || 0)));
       const nextHunger = Math.max(0, Math.min(100, player.stats.hunger + (data.statChanges?.hunger ?? 5) + team.hunger));
@@ -1012,8 +1028,16 @@ export default function App() {
     if (item.category === 'weapon') {
       setPlayer({ ...player, equippedWeapon: item });
     } else if (item.category === 'special') {
-      setPlayer({ ...player, equippedArmor: item });
+      const slot = slotOf(item) || 'body';
+      const equipment = { ...(player.equipment || {}), [slot]: { ...item, slot } };
+      setPlayer({ ...player, equipment, equippedArmor: equipment.body });
     }
+  };
+
+  const handleUnequip = (slot: Slot) => {
+    const equipment = { ...(player.equipment || {}) };
+    delete equipment[slot];
+    setPlayer({ ...player, equipment, equippedArmor: equipment.body });
   };
 
   // Base Warehouse Transfer: Backpack -> Warehouse
@@ -1249,23 +1273,24 @@ export default function App() {
 
   // Chiếm một cứ điểm tìm được trên bản đồ làm căn cứ
   const handleClaimBase = (node: WorldNode) => {
-    if (!node.outpost) return;
+    const info = baseInfoOf(node);
+    if (!info) return;
     setShowMapModal(false);
     sound.playLoot();
     setBase((b) => ({
       ...b,
       hasBase: true,
-      name: node.outpost!.baseName,
+      name: info.baseName,
       location: node.name,
       description: node.description,
-      fortification: 20 + (node.outpost!.bonus.walls || 0) * 15,
-      base_type: node.outpost!.baseKind,
+      fortification: 20 + (info.bonus.walls || 0) * 15,
+      base_type: info.baseKind,
       baseNodeId: node.id,
       fortified: [],
-      modules: { ...node.outpost!.bonus },
+      modules: { ...info.bonus },
       fuel: b.fuel || 0,
     }));
-    setRecentBaseBanner(node.outpost.baseName);
+    setRecentBaseBanner(info.baseName);
     setTimeout(() => setRecentBaseBanner(null), 6000);
     pushLog('survival', `Chiếm ${node.name} làm căn cứ mới`);
   };
@@ -1664,6 +1689,22 @@ export default function App() {
         style={{ backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5  0 0 0 0 0.45  0 0 0 0 0.4  0 0 0 0.9 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>\")" }}
       />
       <div aria-hidden className="pointer-events-none fixed inset-0 z-[5]" style={{ background: 'radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(8,5,2,0.55) 100%)' }} />
+
+      {/* Đói/khát tới 75: nhắc nhỏ ở góc, bấm một cú để ăn/uống theo thứ tự ưu tiên */}
+      {gamePhase === 'playing' && (() => {
+        const alerts: NeedAlert[] = [];
+        if (player.stats.hunger >= NEED_ALERT_AT && !needDismissed.hunger) alerts.push({ kind: 'hunger', value: player.stats.hunger });
+        if (player.stats.thirst >= NEED_ALERT_AT && !needDismissed.thirst) alerts.push({ kind: 'thirst', value: player.stats.thirst });
+        return (
+          <NeedToast
+            alerts={alerts}
+            food={pickFood(player.inventory)}
+            water={pickWater(player.inventory)}
+            onUse={(item) => handleUseItem(item)}
+            onDismiss={(k) => setNeedDismissed((d) => ({ ...d, [k]: true }))}
+          />
+        );
+      })()}
 
       {/* Loot Notification Pop-up Toast */}
       <LootToast
@@ -2193,6 +2234,8 @@ export default function App() {
           inventory={player.inventory}
           equippedWeapon={player.equippedWeapon}
           equippedArmor={player.equippedArmor}
+          equipment={player.equipment}
+          onUnequip={handleUnequip}
           wound={player.wound}
           onUseItem={handleUseItem}
           onCookFood={handleCookFood}

@@ -38,6 +38,35 @@ export interface OutpostInfo {
 
 export const HOME_NODE_ID = 'home';
 
+// Mọi địa điểm đã ghé một lần đều có thể lập căn cứ; độ phù hợp phụ thuộc loại công trình.
+// Cứ điểm ngẫu nhiên (outpost) có thông tin riêng, địa điểm thường dùng bảng này.
+const BASE_BY_KIND: Partial<Record<NodeKind, { score: number; kind: OutpostInfo['baseKind']; pros: string[]; cons: string[]; bonus?: Record<string, number> }>> = {
+  hospital: { score: 55, kind: 'Civilian Shelter', pros: ['Có giường, tủ thuốc và nhiều phòng riêng'], cons: ['Nhiều xác nhiễm cần dọn', 'Mùi hôi thu hút lũ xác sống'], bonus: { medbay: 1 } },
+  pharmacy: { score: 38, kind: 'Civilian Shelter', pros: ['Gần như sẵn thuốc men'], cons: ['Nhỏ, kính vỡ, khó phòng thủ'] },
+  market: { score: 34, kind: 'Civilian Shelter', pros: ['Dễ tìm đồ khô quanh đây'], cons: ['Trống trải, nhiều lối vào', 'Mùi hàng thối thu hút xác sống'] },
+  supermarket: { score: 62, kind: 'Civilian Shelter', pros: ['Kho hàng lớn, cửa cuốn sắt chắc'], cons: ['Mùi thức ăn thu hút kẻ lạ'] },
+  hardware_store: { score: 52, kind: 'Civilian Shelter', pros: ['Đầy vật liệu để gia cố', 'Cửa cuốn sắt'], cons: ['Ít đồ ăn'], bonus: { walls: 1 } },
+  police_station: { score: 72, kind: 'Military Base', pros: ['Tường dày, cửa sắt, phòng giam làm kho an toàn'], cons: ['Là nơi các nhóm vũ trang để mắt tới'], bonus: { walls: 2 } },
+  bridge: { score: 22, kind: 'Nomad', pros: ['Quan sát rộng'], cons: ['Không che chắn, không có nước, gió lạnh'] },
+  industrial: { score: 54, kind: 'Civilian Shelter', pros: ['Nhiều kim loại, máy móc, chỗ rộng'], cons: ['Tiếng vọng lớn, ô nhiễm'] },
+  stadium: { score: 35, kind: 'Civilian Shelter', pros: ['Sức chứa lớn, có hầm ngầm'], cons: ['Quá rộng để giữ'] },
+  tower: { score: 46, kind: 'Apartment', pros: ['Ở trên cao, có tầm nhìn xa'], cons: ['Không điện, leo thang bộ rất mệt'] },
+  depot: { score: 74, kind: 'Military Base', pros: ['Hàng rào, kho quân dụng, tường dày'], cons: ['Xa, hay có kẻ nhắm tới'], bonus: { walls: 2, watchtower: 1 } },
+  farm: { score: 64, kind: 'Civilian Shelter', pros: ['Đất trồng rau, thường có giếng'], cons: ['Nhà ván mỏng, ít tường chắn'], bonus: { garden: 1 } },
+  church: { score: 66, kind: 'Civilian Shelter', pros: ['Tường đá dày, một cửa chính dễ giữ'], cons: ['Tiếng chuông vọng xa nếu bị chạm'], bonus: { walls: 1 } },
+  coldstorage: { score: 58, kind: 'Civilian Shelter', pros: ['Tường cách nhiệt dày, kho lạnh'], cons: ['Không có điện thì hôi và ẩm'] },
+  school: { score: 56, kind: 'Civilian Shelter', pros: ['Nhiều phòng, sân rộng, bể nước'], cons: ['Dễ bị thấy từ xa'] },
+  fuel_station: { score: 30, kind: 'Nomad', pros: ['Có thể còn nhiên liệu'], cons: ['Dễ cháy nổ, trống trải'] },
+};
+
+export function baseInfoOf(node: WorldNode): OutpostInfo | null {
+  if (node.outpost) return node.outpost;
+  if (node.id === 'home') return null;
+  const b = BASE_BY_KIND[node.kind];
+  if (!b) return null;
+  return { baseScore: b.score, baseKind: b.kind, pros: b.pros, cons: b.cons, bonus: b.bonus || {}, baseName: `Căn cứ ${node.name.split(' - ')[0]}` };
+}
+
 // Bán kính ngang của 3 vòng vùng quanh căn cứ (bán kính dọc = 0.75 lần). Các điểm được đặt đúng trên vòng của vùng nó.
 export const RING_RX = { near: 16, mid: 29, far: 43 } as const;
 export const RING_Y_RATIO = 0.75;

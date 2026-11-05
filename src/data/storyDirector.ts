@@ -8,6 +8,7 @@ import { parseStrangerId, resolveStranger, rollStranger, strangerScene, stranger
 import { buildRadioTransmission, RadioIntel } from './radio';
 import { composeEnding, EndingInput } from './storyArc';
 import { servingOf, fmtNamed } from './units';
+import { damageReduction } from './equipment';
 import { resolveRaid, raidTypeFor, raidDayOf, exposureOf, RaidType } from './raid';
 import { decodeMapAction, getNodeAny, REGION_LABEL } from './worldMap';
 import { VEHICLES, ROAD_EVENTS, SAFE_ROAD_LINES, fuelNeededRoundTrip, VehicleKind } from './vehicles';
@@ -1360,6 +1361,12 @@ export function openingScene(settingId: string | undefined, seenBefore: Record<s
 export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.random) {
   const r = plan.resolution;
   const total = mergeStats(plan.baseStats, r.stats, plan.weather);
+  // Trang bị phòng hộ giảm sát thương nhận vào
+  const cut = damageReduction(req.player?.equipment);
+  if (cut > 0 && (total.hp ?? 0) < 0) {
+    const reduced = Math.round((total.hp as number) * (1 - cut));
+    if (reduced > (total.hp as number)) { r.outcome += ' Trang bị phòng hộ trên người đã đỡ bớt phần lớn đòn đánh.'; total.hp = reduced; }
+  }
   const victory = plan.nextDay >= 30 || r.ending?.is_victory;
   return {
     outcome: r.outcome,

@@ -1,4 +1,5 @@
 import { Item } from '../types/game';
+import { slotOf } from './equipment';
 
 // ====================================================================
 // BẢNG LOOT THEO NƠI CHỐN. Thực phẩm đa dạng và thực tế:
@@ -17,6 +18,13 @@ interface Entry {
   item: Partial<Item>;
   q?: [number, number];      // số lượng ngẫu nhiên
   fresh?: [number, number];  // độ tươi ban đầu (nếu là đồ tươi)
+  m?: [number, number];      // chỉ có vào các tháng này (1-12, có thể vòng qua năm: [11, 2])
+}
+
+export const inSeason = (m: [number, number] | undefined, month: number) => !m || (m[0] <= m[1] ? month >= m[0] && month <= m[1] : month >= m[0] || month <= m[1]);
+
+export function seasonName(month: number): string {
+  return month >= 2 && month <= 4 ? 'xuân' : month >= 5 && month <= 8 ? 'hè' : month >= 9 && month <= 11 ? 'thu' : 'đông';
 }
 
 const food = (name: string, hunger: number, o: Partial<Item> = {}): Partial<Item> => ({
@@ -40,6 +48,7 @@ const wpn = (name: string, damage: number, dur: number, o: Partial<Item> = {}): 
   id: 'lt_wpn', name, category: 'weapon', quantity: 1, damage, durability: dur, maxDurability: dur, rarity: 'common', description: 'Vũ khí cận chiến tìm được.', ...o,
 });
 const armor = (name: string, defense: number, o: Partial<Item> = {}): Partial<Item> => ({
+  slot: slotOf({ name }) || undefined,
   id: 'lt_armor', name, category: 'special', quantity: 1, defense, durability: 60, maxDurability: 60, rarity: 'common', description: 'Đồ che chắn, giảm sát thương khi bị cắn hoặc cào.', ...o,
 });
 const tool = (name: string, o: Partial<Item> = {}): Partial<Item> => ({
@@ -77,6 +86,14 @@ export const LOOT: Record<LootTableId, Entry[]> = {
     { w: 2, item: { id: 'lt_ammo', name: 'Đạn quân dụng', category: 'ammo', quantity: 5, rarity: 'uncommon', description: 'Đạn nhỏ, cần có súng tương ứng.' } },
   ],
   clothing: [
+    { w: 7, item: armor('Quần jean dày', 2, { description: 'Vải bò dày, chống trầy xước và cành gai.' }) },
+    { w: 5, item: armor('Quần dã chiến nhiều túi', 3, { description: 'Vải bố bền, nhiều túi đựng đồ.' }) },
+    { w: 4, item: armor('Quần bảo hộ lao động', 4, { description: 'Có lớp đệm ở gối và đùi.' }) },
+    { w: 6, item: armor('Ủng cao su', 2, { description: 'Lội nước, bước qua vũng bẩn mà không sợ ướt chân.' }) },
+    { w: 4, item: armor('Ủng quân đội', 5, { rarity: 'uncommon', description: 'Đế dày, cổ cao, bảo vệ mắt cá khỏi răng cắn.' }) },
+    { w: 6, item: armor('Giày thể thao cũ', 1, { description: 'Nhẹ, chạy tốt, nhưng bảo vệ chẳng bao nhiêu.' }) },
+    { w: 4, item: armor('Nón lưỡi trai', 1) },
+    { w: 4, item: armor('Găng da', 3) },
     { w: 7, item: armor('Áo khoác da dày', 6, { description: 'Da dày, khó bị răng cắn xuyên qua.' }) },
     { w: 6, item: armor('Mũ bảo hiểm xe máy', 5, { description: 'Bảo vệ đầu và gáy.' }) },
     { w: 6, item: armor('Găng tay lao động', 2) },
@@ -179,6 +196,16 @@ export const LOOT: Record<LootTableId, Entry[]> = {
     { w: 4, item: drink('Hộp sữa tươi tiệt trùng', 18, { hungerReduce: 12, isSealed: true }) },
   ],
   market: [
+    { w: 5, m: [5, 8], item: fresh('Dưa hấu', 16, { thirstReduce: 25 }), fresh: [40, 70] },
+    { w: 5, m: [4, 7], item: fresh('Xoài cát', 16), q: [2, 4], fresh: [45, 75] },
+    { w: 4, m: [5, 7], item: fresh('Vải thiều', 12), q: [3, 6], fresh: [35, 65] },
+    { w: 4, m: [10, 2], item: fresh('Quýt đường', 10, { thirstReduce: 10 }), q: [3, 5], fresh: [40, 70] },
+    { w: 4, m: [9, 12], item: fresh('Hồng giòn', 14), q: [2, 4], fresh: [50, 80] },
+    { w: 4, m: [10, 3], item: fresh('Bắp cải', 12, { needsCooking: true }), fresh: [55, 85] },
+    { w: 4, m: [10, 3], item: fresh('Su hào', 12, { needsCooking: true }), q: [1, 2], fresh: [55, 85] },
+    { w: 4, item: fresh('Táo', 14), q: [2, 4], fresh: [50, 80] },
+    { w: 4, item: fresh('Dưa chuột', 8, { thirstReduce: 14 }), q: [2, 3], fresh: [45, 75] },
+    { w: 3, item: fresh('Thanh long', 12, { thirstReduce: 8 }), q: [1, 2], fresh: [45, 75] },
     { w: 8, item: fresh('Rau muống', 8, { needsCooking: true }), q: [1, 2], fresh: [35, 65] },
     { w: 7, item: fresh('Cà chua', 10), q: [2, 4], fresh: [45, 75] },
     { w: 6, item: fresh('Cà rốt', 14), q: [2, 3], fresh: [55, 85] },
@@ -204,7 +231,27 @@ export const LOOT: Record<LootTableId, Entry[]> = {
     { w: 3, item: mat('Cuộn băng keo bạc') },
     { w: 3, item: mat('Can xăng nhỏ', { rarity: 'uncommon', description: 'Nhiên liệu chạy máy phát hoặc chế chai cháy.' }) },
   ],
+  // Trái cây và rau củ theo mùa ở bảng tìm đồ ăn ngoài vườn, chợ, ao hồ
   forage: [
+    { w: 6, m: [5, 7], item: fresh('Vải thiều', 12, { description: 'Trái mùa hè, ngọt mát.' }), q: [3, 8], fresh: [65, 90] },
+    { w: 6, m: [6, 8], item: fresh('Nhãn lồng', 12, { description: 'Trái mùa hè, ngọt đậm.' }), q: [3, 8], fresh: [65, 90] },
+    { w: 5, m: [4, 7], item: fresh('Mít chín', 26, { description: 'Múi mít thơm lừng, no lâu.' }), fresh: [60, 85] },
+    { w: 5, m: [4, 8], item: fresh('Dưa hấu', 16, { thirstReduce: 25, description: 'Nhiều nước, giải khát rất tốt.' }), fresh: [65, 90] },
+    { w: 4, m: [6, 8], item: fresh('Chôm chôm', 10), q: [3, 7], fresh: [60, 85] },
+    { w: 5, m: [8, 10], item: fresh('Na (mãng cầu)', 14), q: [1, 3], fresh: [60, 85] },
+    { w: 5, m: [9, 12], item: fresh('Hồng giòn', 14), q: [2, 4], fresh: [70, 92] },
+    { w: 5, m: [9, 11], item: fresh('Bưởi da xanh', 20, { thirstReduce: 14 }), fresh: [75, 95] },
+    { w: 5, m: [10, 2], item: fresh('Cam vàng', 14, { thirstReduce: 12 }), q: [2, 5], fresh: [65, 90] },
+    { w: 4, m: [11, 2], item: fresh('Quýt', 10, { thirstReduce: 10 }), q: [3, 6], fresh: [65, 90] },
+    { w: 4, m: [12, 3], item: fresh('Mía cây', 8, { thirstReduce: 18, description: 'Nhai lấy nước ngọt, đỡ khát.' }), fresh: [75, 95] },
+    { w: 4, m: [2, 4], item: fresh('Mận hậu', 10), q: [3, 6], fresh: [60, 85] },
+    { w: 4, m: [3, 6], item: fresh('Mơ chua', 8), q: [3, 6], fresh: [60, 85] },
+    { w: 5, item: fresh('Khoai lang', 32, { needsCooking: true, description: 'Củ chắc bụng, nướng luộc đều ngon.' }), q: [2, 4], fresh: [75, 95] },
+    { w: 4, item: fresh('Sắn (khoai mì)', 34, { needsCooking: true, description: 'Phải luộc kỹ mới ăn được.' }), q: [1, 3], fresh: [75, 95] },
+    { w: 4, item: fresh('Mướp hương', 8, { needsCooking: true }), q: [1, 3], fresh: [60, 85] },
+    { w: 3, item: fresh('Bầu', 8, { needsCooking: true }), fresh: [60, 85] },
+    { w: 3, item: fresh('Cà tím', 10, { needsCooking: true }), q: [1, 3], fresh: [60, 85] },
+    { w: 3, item: fresh('Đu đủ chín', 16), fresh: [60, 85] },
     { w: 8, item: fresh('Rau má dại', 6, { needsCooking: true, description: 'Hái ven bờ cỏ; nấu canh giải nhiệt.' }), q: [1, 3], fresh: [70, 95] },
     { w: 7, item: fresh('Ổi chín', 12, { description: 'Hái trong vườn bỏ hoang, ngọt giòn.' }), q: [2, 5], fresh: [60, 85] },
     { w: 6, item: fresh('Chuối xanh', 20, { needsCooking: true }), q: [2, 5], fresh: [75, 95] },
@@ -274,8 +321,8 @@ export const LOOT: Record<LootTableId, Entry[]> = {
 let seq = 0;
 
 // Bốc ngẫu nhiên n món theo trọng số (không trùng món trong cùng một lần bốc).
-export function rollLoot(table: LootTableId, n: number, rng: () => number = Math.random): Item[] {
-  const pool = [...LOOT[table]];
+export function rollLoot(table: LootTableId, n: number, rng: () => number = Math.random, month: number = new Date().getMonth() + 1): Item[] {
+  const pool = LOOT[table].filter((e) => inSeason(e.m, month));
   const out: Item[] = [];
   for (let i = 0; i < n && pool.length; i++) {
     const total = pool.reduce((s, e) => s + e.w, 0);
