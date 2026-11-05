@@ -8,7 +8,7 @@ import { LootTableId } from './lootTables';
 // ====================================================================
 
 export type MapRegion = 'home' | 'near' | 'mid' | 'far';
-export type NodeKind = 'farm' | 'church' | 'coldstorage' | 'school' | 'fuel_station' | 'home' | 'hardware_store' | 'pharmacy' | 'market' | 'supermarket' | 'hospital' | 'police_station' | 'bridge' | 'industrial' | 'stadium' | 'tower' | 'depot';
+export type NodeKind = 'farm' | 'church' | 'coldstorage' | 'school' | 'fuel_station' | 'home' | 'hardware_store' | 'pharmacy' | 'market' | 'supermarket' | 'hospital' | 'police_station' | 'bridge' | 'industrial' | 'stadium' | 'tower' | 'depot' | 'crash' | 'truck' | 'flood';
 
 export interface WorldNode {
   id: string;
@@ -243,9 +243,39 @@ export function buildOutpostNodes(instances: OutpostInstance[]): WorldNode[] {
     .filter(Boolean) as WorldNode[];
 }
 
+// Điểm động (máy bay rơi, xe tải cướp, thùng trôi dạt): xuất hiện tạm thời trên bản đồ.
+export interface DynamicSiteInstance { id: string; kind: 'crash' | 'truck' | 'flood'; name: string; region: 'near' | 'mid'; x: number; y: number; connections: string[]; expiresDay: number; spawnedDay: number }
+
+function dynamicToNode(d: Pick<DynamicSiteInstance, 'id' | 'kind' | 'name' | 'region' | 'x' | 'y' | 'connections'>): WorldNode {
+  const desc = d.kind === 'crash' ? 'Thân máy bay vỡ làm đôi, thùng hàng cứu trợ văng khắp bãi cỏ. Khói còn bốc lên, và tiếng động sẽ kéo cả vùng tới đây rất sớm.' : d.kind === 'truck' ? 'Chiếc xe tải nằm nghiêng giữa đường, cửa cabin mở toang, xác bọn cướp rải rác quanh. Vài con xác sống vẫn lảng vảng.' : 'Những thùng gỗ kẹt giữa bờ sông, nước còn rỉ ra từ khe nắp. Chúng sẽ bị cuốn đi tiếp trong một hai ngày.';
+  return { id: d.id, name: d.name, kind: d.kind, region: d.region, x: d.x, y: d.y, danger: d.kind === 'flood' ? 2 : d.kind === 'truck' ? 4 : 3, description: desc, resources: d.kind === 'crash' ? ['Hàng cứu trợ', 'Thuốc men', 'Hành lý'] : d.kind === 'truck' ? ['Hàng cướp được', 'Vũ khí', 'Đồ ăn'] : ['Thùng hàng', 'Đồ khô', 'Đồ cắm trại'], connections: d.connections, loot: { common: [] } };
+}
+
+export function buildDynamicNodes(list: DynamicSiteInstance[], day: number): WorldNode[] {
+  return list.filter((d) => day <= d.expiresDay).map(dynamicToNode);
+}
+
+// Đặt điểm động lên bản đồ gần các điểm sẵn có.
+export function placeDynamicSite(spec: { id: string; kind: DynamicSiteInstance['kind']; name: string; region: 'near' | 'mid'; expiresDay: number }, day: number, taken: { x: number; y: number }[], rng: () => number = Math.random): DynamicSiteInstance {
+  const home = NODE_BY_ID[HOME_NODE_ID];
+  const rx = spec.region === 'near' ? RING_RX.near : RING_RX.mid;
+  let best = { x: home.x + rx, y: home.y };
+  for (let i = 0; i < 40; i++) {
+    const ang = rng() * Math.PI * 2;
+    const x = home.x + Math.cos(ang) * (rx + (rng() - 0.5) * 3);
+    const y = home.y + Math.sin(ang) * (rx + (rng() - 0.5) * 3) * RING_Y_RATIO;
+    if (x < 5 || x > 95 || y < 5 || y > 66) continue;
+    if ([...WORLD_NODES, ...taken].every((p) => Math.hypot(p.x - x, (p.y - y) / RING_Y_RATIO) > 8)) { best = { x, y }; break; }
+  }
+  const near = WORLD_NODES.filter((n) => n.id !== HOME_NODE_ID).map((n) => ({ id: n.id, d: Math.hypot(n.x - best.x, n.y - best.y) })).sort((a, b) => a.d - b.d).slice(0, 2).map((n) => n.id);
+  return { id: spec.id, kind: spec.kind, name: spec.name, region: spec.region, x: +best.x.toFixed(1), y: +best.y.toFixed(1), connections: near, expiresDay: spec.expiresDay, spawnedDay: day };
+}
+
 // Tìm node theo id, kể cả cứ điểm (server không biết vị trí nên toạ độ là 0).
 export function getNodeAny(id: string): WorldNode | undefined {
   if (NODE_BY_ID[id]) return NODE_BY_ID[id];
+  const dyn = id.match(/^dyn_(crash|truck|flood)_/);
+  if (dyn) { const kind = dyn[1] as 'crash' | 'truck' | 'flood'; return dynamicToNode({ id, kind, name: kind === 'crash' ? 'Máy bay cứu trợ rơi' : kind === 'truck' ? 'Xe tải của nhóm cướp' : 'Thùng hàng trôi dạt', region: kind === 'crash' ? 'mid' : 'near', x: 0, y: 0, connections: [] }); }
   const tpl = OUTPOST_BY_TEMPLATE[id.replace(/^op_/, '')];
   return tpl ? outpostToNode(tpl, 0, 0, []) : undefined;
 }
@@ -299,7 +329,7 @@ export const REGION_LABEL: Record<MapRegion, string> = { home: 'Căn cứ', near
 export const KIND_ICON: Record<NodeKind, string> = {
   home: '🏠', hardware_store: '🔧', pharmacy: '💊', market: '🛒', supermarket: '📦', hospital: '🏥',
   police_station: '🚓', bridge: '🌉', industrial: '🏭', stadium: '🏟️', tower: '🏙️', depot: '🪖',
-  farm: '🏡', church: '⛪', coldstorage: '🧊', school: '🏫', fuel_station: '⛽',
+  farm: '🏡', church: '⛪', coldstorage: '🧊', school: '🏫', fuel_station: '⛽', crash: '✈️', truck: '🚚', flood: '🌊',
 };
 
 // Mã hóa/giải mã hành động di chuyển để server xử lý tất định.

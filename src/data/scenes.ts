@@ -57,6 +57,7 @@ export interface SceneCtx {
   hasRawFood: boolean;
   night: boolean;
   flags: string[];
+  housesVisited: number;
 }
 
 export interface SceneStats {
@@ -83,6 +84,7 @@ export interface RoutineChoice {
   team?: TeamOp | TeamOp[];     // tác động lên đồng đội được chọn theo tiêu chí
   lose?: { name: string; quantity: number }[];
   go?: Zone;                    // đổi vùng (director chèn câu di chuyển)
+  site?: 'house';               // mở giao diện kiểm tra hòm đồ của một căn nhà hoang
   inflictWound?: string;
   healWound?: boolean;
   requires?: { re: RegExp; label: string }[];
@@ -524,6 +526,17 @@ export const ROUTINE_SCENES: RoutineScene[] = [
       { text: 'Xả đầy mọi thứ chứa được: bồn tắm, xô, chậu, nồi, can', outcome: 'Bạn chạy khắp nơi hứng nước đến khi tay rã rời. Nước máy chưa đun, nhưng đây là thứ quý nhất khi vòi khô: hơn hai chục lít nằm sẵn trong các xô chậu.', stats: { stamina: -9, sanity: 3 }, gain: [{ id: 'water_tap', name: 'Nước máy trữ trong xô và nồi', category: 'food', unit: 'l', quantity: 22, thirstReduce: 55, needsCooking: true, canSpoil: false, description: 'Tính theo lít. Phải đun sôi mới an toàn.' }], flags: ['water_stored'] },
       { text: 'Chỉ đổ đầy chai và can nhỏ rồi đóng chặt nắp', outcome: 'Bạn chọn cách gọn: mỗi chai một lít, vặn kín nắp, xếp dọc chân tường. Không nhiều bằng cách kia nhưng dễ mang theo và đỡ bị đổ.', stats: { stamina: -4, sanity: 2 }, gain: [{ id: 'water_bottle_home', name: 'Chai nước đun sôi để nguội 1L', category: 'food', quantity: 5, thirstReduce: 40, canSpoil: false, description: 'Nước uống sạch dự trữ, tính theo chai.' }], flags: ['water_stored'] },
       { text: 'Đun sôi một nồi lớn, để nguội rồi chia vào chai', outcome: 'Việc đun nấu mất cả buổi và tốn gas, nhưng bạn có được vài chai nước sạch, không phải lo bụng đau khi uống.', stats: { stamina: -7, sanity: 3 }, gain: [{ id: 'water_boiled_batch', name: 'Chai nước đun sôi để nguội 1L', category: 'food', quantity: 4, thirstReduce: 40, canSpoil: false, description: 'Nước uống sạch dự trữ, tính theo chai.' }, { id: 'water_tap2', name: 'Nước máy trữ trong xô và nồi', category: 'food', unit: 'l', quantity: 8, thirstReduce: 55, needsCooking: true, canSpoil: false, description: 'Tính theo lít. Phải đun sôi mới an toàn.' }], flags: ['water_stored'] },
+    ],
+  },
+  // ============ NHÀ HOANG: KỂ CHUYỆN QUA DẤU VẾT, LỤC TỪNG HÒM ĐỒ ============
+  {
+    id: 'r_abandoned_house', zones: ['near'], primary: 'near', weight: 3,
+    when: (c) => c.day >= 2 && c.housesVisited < 8,
+    situation: () => 'Ở {near}, {neighbor} vẫn còn khép hờ, không có tiếng người. Bên trong thoang thoảng mùi ẩm mốc và một thứ mùi bạn không muốn nghĩ tới. Mỗi căn nhà bỏ hoang là một câu chuyện dang dở, và có thể là vài món đồ còn dùng được.',
+    choices: [
+      { text: 'Gõ nhẹ rồi bước vào, kiểm tra từng phòng một', outcome: 'Bạn đẩy cửa, đứng yên một lúc cho mắt quen với bóng tối. Không có gì cử động. Bạn bắt đầu đi vào bên trong, từng bước một.', stats: { stamina: -2 }, go: 'near', site: 'house' },
+      { text: 'Trèo cửa sổ tầng trệt vào, cố không gây tiếng động', outcome: 'Bạn luồn người qua khung cửa sổ vỡ, chân chạm nền gạch lạnh ngắt. Tiếng sột soạt của vải áo nghe to bất thường trong im lặng.', stats: { stamina: -4 }, go: 'near', site: 'house' },
+      { text: 'Chỉ liếc qua khe cửa rồi quay đi, không muốn biết bên trong có gì', outcome: 'Bạn nhìn thấy một vệt tối trên sàn rồi lùi lại. Có những căn nhà tốt nhất là để yên.', stats: { sanity: -1 } },
     ],
   },
   // ============ SINH HOẠT THƯỜNG NGÀY TRONG CHỖ TRÚ ============

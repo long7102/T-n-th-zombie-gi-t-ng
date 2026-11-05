@@ -27,8 +27,49 @@ const Win: React.FC<{ x: number; y: number; w?: number; h?: number; lit?: boolea
 
 
 // Mỗi cứ điểm ngẫu nhiên có một bản vẽ riêng, không dùng chung với địa điểm cùng loại.
-function variantBuilding(variant?: string): React.ReactNode | null {
+function variantBuilding(rawVariant?: string): React.ReactNode | null {
+  const variant = rawVariant ? rawVariant.replace(/^(dyn_[a-z]+)_\d+$/, '$1') : rawVariant;
   switch (variant) {
+    case 'house':
+      return (
+        <g>
+          <path d="M80 122V76L160 38L240 76V122Z" fill={MID} stroke={EDGE} />
+          <rect x="146" y="92" width="28" height="30" fill="#05070a" /><path d="M146 92L174 122M174 92L146 122" stroke="#8a826c" strokeWidth="0.8" opacity="0.35" />
+          <Win x={98} y={88} w={11} h={10} /><Win x={206} y={88} w={11} h={10} lit />
+          <rect x="214" y="44" width="10" height="22" fill={INK} stroke={EDGE} />
+          <g stroke="#2a3038">{[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => <line key={i} x1={20 + i * 10} y1="122" x2={20 + i * 10} y2="106" />)}<line x1="20" y1="110" x2="100" y2="110" /></g>
+        </g>
+      );
+    case 'dyn_crash':
+      return (
+        <g>
+          <path d="M40 116L120 96L170 84L190 96L120 118Z" fill={MID} stroke={EDGE} />
+          <path d="M170 84L230 70L270 92L196 100Z" fill={INK} stroke={EDGE} transform="rotate(6 200 90)" />
+          <path d="M126 94L100 62L116 60L142 90Z" fill={INK} stroke={EDGE} />
+          <path className="pi-smoke" d="M150 84C142 66 160 56 150 38C146 26 158 18 152 4" stroke="#0a0808" strokeWidth="11" fill="none" opacity="0.45" strokeLinecap="round" />
+          <g fill="#c9c2b0" opacity="0.55"><path d="M232 108Q244 86 256 108Z" /><path d="M262 112Q272 94 282 112Z" /></g>
+          <g fill={INK} stroke={EDGE}><rect x="58" y="104" width="14" height="12" /><rect x="86" y="108" width="12" height="10" /></g>
+          <circle cx="150" cy="88" r="3" fill={LAMP} className="pi-lamp" />
+        </g>
+      );
+    case 'dyn_truck':
+      return (
+        <g>
+          <g transform="rotate(-8 160 100)"><rect x="60" y="72" width="130" height="40" fill={MID} stroke={EDGE} /><path d="M190 82H224L236 98V112H190Z" fill={INK} stroke={EDGE} /><rect x="198" y="86" width="18" height="12" fill="#05070a" /><circle cx="92" cy="114" r="9" fill="#05060a" stroke={EDGE} /><circle cx="210" cy="114" r="9" fill="#05060a" stroke={EDGE} /></g>
+          <g fill={INK} stroke="#1a222b">{[40, 84, 252, 280].map((x, i) => <g key={x} transform={`translate(${x} ${112 + (i % 2) * 3})`}><circle cx="0" cy="-14" r="3" /><path d="M-3 -11L3 -11L5 2H-5Z" /><path d="M-3 -9L-11 -3M3 -9L11 -2" fill="none" /></g>)}</g>
+          <g fill="#2c2820"><ellipse cx="150" cy="118" rx="20" ry="3" /></g>
+          <circle cx="236" cy="96" r="2" fill={LAMP} className="pi-lamp" />
+        </g>
+      );
+    case 'dyn_flood':
+      return (
+        <g>
+          <path d="M0 92Q80 84 160 92T320 90V122H0Z" fill="#0c1218" />
+          <path className="pi-wave" d="M-10 100Q60 94 120 100T250 100T340 98V122H-10Z" fill="#14202c" opacity="0.8" />
+          {[[70, 86, 26], [150, 94, 30], [230, 88, 24]].map(([x, y, w], i) => <g key={i} transform={`translate(${x} ${y}) rotate(${i * 8 - 6})`}><rect width={w} height="18" fill="#2a2218" stroke={EDGE} /><line x1="0" y1="9" x2={w} y2="9" stroke="#161008" /></g>)}
+          <g stroke="#1c2a22" strokeWidth="1.4" fill="none">{[20, 34, 280, 296].map((x) => <path key={x} d={`M${x} 124Q${x - 4} 100 ${x + 2} 84`} />)}</g>
+        </g>
+      );
     case 'op_hospital_basement':
       return (
         <g>
@@ -329,6 +370,8 @@ export const PlaceIllustration: React.FC<Props> = ({ kind, danger, known, seed, 
         @keyframes pi-rot{to{transform:rotate(360deg)}}
         .pi-sway{animation:pi-swing 5s ease-in-out infinite alternate;transform-box:fill-box;transform-origin:50% 0}
         @keyframes pi-swing{from{transform:rotate(-3deg)}to{transform:rotate(3deg)}}
+        .pi-wave{animation:pi-wv 5s ease-in-out infinite alternate}
+        @keyframes pi-wv{from{transform:translateX(-6px)}to{transform:translateX(6px)}}
         .pi-fog{animation:pi-fogmove 30s ease-in-out infinite alternate}
         @keyframes pi-fogmove{from{transform:translateX(-40px)}to{transform:translateX(40px)}}
         @media (prefers-reduced-motion: reduce){.pi-lamp,.pi-smoke,.pi-fog,.pi-spin,.pi-sway{animation:none}}
