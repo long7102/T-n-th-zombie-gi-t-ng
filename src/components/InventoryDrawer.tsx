@@ -4,11 +4,14 @@ import { Package, Shield, Swords, X, Hammer, Flame, AlertCircle } from 'lucide-r
 import { Item, ItemCategory, WoundState } from '../types/game';
 import { CATEGORY_LABEL, itemIcon, quickFacts } from '../utils/itemIcon';
 import { sound } from '../utils/audio';
+import { Equipment, Slot, SLOTS as EQUIP_SLOTS, SLOT_ICON, SLOT_LABEL, slotOf, totalDefense } from '../data/equipment';
 
 interface InventoryDrawerProps {
   inventory: Item[];
   equippedWeapon?: Item;
   equippedArmor?: Item;
+  equipment?: Equipment;
+  onUnequip?: (slot: Slot) => void;
   wound: WoundState;
   onUseItem: (item: Item) => void;
   onCookFood: (item: Item) => void;
@@ -34,7 +37,7 @@ const FILTERS: (ItemCategory | 'all')[] = ['all', 'food', 'medical', 'weapon', '
 const SLOTS = 30; // số ô tối thiểu hiển thị, các ô trống làm nền cho cảm giác "balo"
 
 export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
-  inventory, equippedWeapon, equippedArmor, wound,
+  inventory, equippedWeapon, equippedArmor, equipment, onUnequip, wound,
   onUseItem, onCookFood, onDryFood, onFreezeFood, canFreeze, onEquipItem, onOpenCrafting, onOpenBaseWarehouse, onClose,
 }) => {
   const [filter, setFilter] = useState<ItemCategory | 'all'>('all');
@@ -52,8 +55,8 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
 
   const isSpoiledItem = (i: Item) => i.category === 'food' && i.freshness !== undefined && i.freshness < 30;
   const canUse = (i: Item) => i.category === 'medical' || i.category === 'food';
-  const canEquip = (i: Item) => i.category === 'weapon' || i.category === 'special';
-  const isEquipped = (i: Item) => equippedWeapon?.id === i.id || equippedArmor?.id === i.id;
+  const canEquip = (i: Item) => i.category === 'weapon' || (i.category === 'special' && !!slotOf(i) || i.category === 'special');
+  const isEquipped = (i: Item) => equippedWeapon?.id === i.id || EQUIP_SLOTS.some((k) => equipment?.[k]?.id === i.id) || equippedArmor?.id === i.id;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-3 backdrop-blur-sm select-none sm:p-4">
@@ -95,21 +98,37 @@ export const InventoryDrawer: React.FC<InventoryDrawerProps> = ({
           </div>
         )}
 
-        {/* Trang bị đang dùng */}
-        <div className="grid grid-cols-2 gap-2 border-b border-neutral-800 bg-neutral-950/40 p-3">
-          <div className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900/70 p-2">
-            <Swords className="h-4 w-4 shrink-0 text-red-400" />
-            <div className="min-w-0">
-              <div className="font-mono text-[10px] uppercase text-neutral-400">Vũ khí</div>
-              <div className="truncate text-xs font-semibold text-white">{equippedWeapon ? `${equippedWeapon.name} (${equippedWeapon.damage || 20})` : 'Tay không'}</div>
+        {/* Trang bị đang dùng: vũ khí và 5 ô phòng hộ */}
+        <div className="border-b border-neutral-800 bg-neutral-950/40 p-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+            <div className="twm-cell flex items-center gap-2 border border-neutral-800 p-2 sm:col-span-1">
+              <Swords className="h-4 w-4 shrink-0 text-red-400" />
+              <div className="min-w-0">
+                <div className="font-mono text-[10px] uppercase text-neutral-400">Vũ khí</div>
+                <div className="twm-type truncate text-[11px] font-semibold text-white">{equippedWeapon ? `${equippedWeapon.name} (${equippedWeapon.damage || 20})` : 'Tay không'}</div>
+              </div>
             </div>
+            {EQUIP_SLOTS.map((k) => {
+              const it = equipment?.[k] || (k === 'body' ? equippedArmor : undefined);
+              return (
+                <button
+                  key={k}
+                  onClick={() => { if (it && onUnequip) { sound.playClick(); onUnequip(k); } }}
+                  title={it ? `${it.name} (+${it.defense ?? 0}). Bấm để cởi` : `Ô ${SLOT_LABEL[k]} đang trống`}
+                  className={`twm-cell flex items-center gap-2 border p-2 text-left ${it ? 'cursor-pointer border-sky-900/80' : 'cursor-default border-neutral-800 opacity-70'}`}
+                >
+                  <span className="twm-ink text-lg leading-none">{SLOT_ICON[k]}</span>
+                  <div className="min-w-0">
+                    <div className="font-mono text-[10px] uppercase text-neutral-400">{SLOT_LABEL[k]}</div>
+                    <div className="twm-type truncate text-[11px] font-semibold text-white">{it ? `${it.name} +${it.defense ?? 0}` : 'Trống'}</div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          <div className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-900/70 p-2">
-            <Shield className="h-4 w-4 shrink-0 text-sky-400" />
-            <div className="min-w-0">
-              <div className="font-mono text-[10px] uppercase text-neutral-400">Giáp / áo</div>
-              <div className="truncate text-xs font-semibold text-white">{equippedArmor ? `${equippedArmor.name} (+${equippedArmor.defense ?? 0})` : 'Áo thường'}</div>
-            </div>
+          <div className="mt-2 flex items-center gap-2 font-mono text-[11px] text-neutral-400">
+            <Shield className="h-3.5 w-3.5 text-sky-400" />Tổng phòng thủ <span className="font-bold text-sky-300">+{totalDefense({ ...(equipment || {}), body: equipment?.body || equippedArmor })}</span>
+            <span className="text-neutral-500">· giảm {Math.min(50, totalDefense({ ...(equipment || {}), body: equipment?.body || equippedArmor }) * 2)}% sát thương nhận vào</span>
           </div>
         </div>
 

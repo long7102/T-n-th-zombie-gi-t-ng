@@ -66,6 +66,7 @@ export interface Item {
   description: string;
   rarity: ItemRarity;
   iconName?: string;
+  slot?: 'head' | 'body' | 'legs' | 'feet' | 'hands'; // ô trang bị phòng hộ
   unit?: 'kg' | 'l'; // kg: quantity là số kg (gạo); l: quantity là số lít (nước trữ trong can/xô). Không có: đếm theo cái/chai.
 
   // Thuộc tính bảo quản & ôi thiu thực phẩm
@@ -160,6 +161,7 @@ export interface PlayerCharacter {
   inventory: Item[];
   equippedWeapon?: Item;
   equippedArmor?: Item;
+  equipment?: Partial<Record<'head' | 'body' | 'legs' | 'feet' | 'hands', Item>>; // mũ, áo, quần, giày, găng
 }
 
 export interface MapLocation {

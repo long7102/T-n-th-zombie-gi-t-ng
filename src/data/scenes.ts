@@ -298,6 +298,97 @@ const STORY_SCENES: RoutineScene[] = [
 const nm = (c: SceneCtx, who: TeamWho) => selectCompanions(c.comps, who)[0]?.name || 'một người trong nhóm';
 
 const COMPANION_SCENES: RoutineScene[] = [
+  // ============ SINH HOẠT ẤM ÁP GIỮA NHỮNG NGƯỜI Ở CHUNG ============
+  {
+    id: 'r_cook_together', zones: ['shelter'], primary: 'shelter', weight: 2.5,
+    when: (c) => c.comps.length >= 2 && c.hunger < 70,
+    situation: (c) => nm(c, 'highest_trust') + ' đã nhóm bếp từ lúc nào, còn ' + nm(c, 'lowest_morale') + ' ngồi nhặt rau bên cạnh. Mùi hành phi khiến cả {shelter} bỗng giống một mái nhà thật. Họ nhìn bạn: "Vào phụ một tay không?"',
+    choices: [
+      { text: 'Xắn tay áo vào cùng nấu, vừa làm vừa nói chuyện', outcome: 'Bạn thái, họ nêm, ai cũng nói nhiều hơn bình thường. Bữa cơm hôm nay không có gì đặc biệt, nhưng cả nhóm ăn chậm hơn và cười được vài lần.', stats: { stamina: -2, sanity: 5 }, team: { who: 'all', trust: 3, morale: 6, affection: 1 } },
+      { text: 'Ngồi canh cửa trong lúc họ nấu, nhận bát cơm đầu tiên', outcome: 'Bạn giữ vị trí gần cửa, tai vẫn nghe ngóng. Có người bưng bát cơm nóng tới tận tay bạn, không nói gì, chỉ gật đầu.', stats: { sanity: 3 }, team: { who: 'all', trust: 2, morale: 3 } },
+      { text: 'Đề nghị dành riêng một phần cho bữa mai, nấu ít đi', outcome: 'Bạn nói về chuyện tiết kiệm. Mọi người đồng ý, dù có chút tiếc nuối khi nhìn nồi cơm vơi đi.', stats: { sanity: 1 }, team: { who: 'all', trust: 1, morale: -1 } },
+    ],
+  },
+  {
+    id: 'r_card_night', zones: ['shelter'], primary: 'shelter', weight: 2,
+    when: (c) => c.comps.length >= 2 && c.night,
+    situation: (c) => 'Đêm dài. ' + nm(c, 'highest_affection') + ' lôi ra một bộ bài cũ nhàu nát từ đáy ba lô: "Ngủ không được thì chơi một ván. Thua thì rửa bát." Ngọn nến khẽ lung lay trên bàn.',
+    choices: [
+      { text: 'Nhận lời, chơi hết mình và cố thắng', outcome: 'Cả bọn cãi nhau chí chóe vì một lá bài, rồi bật cười. Lần đầu tiên sau nhiều ngày, căn phòng nghe có tiếng cười thật.', stats: { stamina: -2, sanity: 6 }, team: { who: 'all', morale: 7, trust: 2 } },
+      { text: 'Chơi, nhưng cố tình thua để người đang buồn thắng', outcome: 'Bạn xuề xòa thua và nhận phần rửa bát. Người kia nhận ra nhưng không nói, chỉ liếc bạn một cái rất lâu.', stats: { sanity: 4 }, team: { who: 'lowest_morale', morale: 10, trust: 4, affection: 2 } },
+      { text: 'Từ chối nhẹ nhàng, bảo mình phải thức canh', outcome: 'Họ chơi thiếu bạn, tiếng cười nhỏ hơn. Bạn ngồi gần cửa nghe lén tiếng họ, và tự hỏi mình có đang bỏ lỡ điều gì không.', stats: { sanity: -1 }, team: { who: 'all', morale: 2 } },
+    ],
+  },
+  {
+    id: 'r_teach_skill', zones: ['shelter'], primary: 'shelter', weight: 2,
+    when: (c) => c.comps.length >= 2,
+    situation: (c) => nm(c, 'highest_trust') + ' đang chỉ cho ' + nm(c, 'lowest_trust') + ' cách buộc nút dây, băng một vết thương giả, hay đếm bước khi lẻn qua hành lang. Người học ngượng nghịu, người dạy kiên nhẫn. Có vẻ họ sẽ hợp nhau hơn nếu bạn khéo léo.',
+    choices: [
+      { text: 'Ngồi xuống cùng học, hỏi cả những câu ngớ ngẩn', outcome: 'Bạn hỏi những câu mà ai cũng ngại hỏi, và cả hai bật cười. Từ hôm đó họ nói chuyện với nhau tự nhiên hơn hẳn.', stats: { stamina: -1, sanity: 3 }, team: [{ who: 'highest_trust', trust: 3, morale: 4 }, { who: 'lowest_trust', trust: 6, morale: 5 }] },
+      { text: 'Khen người dạy trước mặt mọi người, để họ thấy được trân trọng', outcome: 'Người dạy đỏ tai, còn người học nhìn họ bằng ánh mắt khác. Một sợi dây nhỏ vừa được thắt lại.', stats: { sanity: 2 }, team: [{ who: 'highest_trust', trust: 5, affection: 2 }, { who: 'lowest_trust', trust: 3 }] },
+      { text: 'Để họ tự xoay xở, chỉ đứng xa quan sát', outcome: 'Bạn không xen vào. Một lúc sau, người học làm đúng, người dạy khẽ gật. Có những mối quan hệ cần được để yên.', stats: { sanity: 1 }, team: { who: 'lowest_trust', trust: 2 } },
+    ],
+  },
+  {
+    id: 'r_birthday', zones: ['shelter'], primary: 'shelter', weight: 1.5,
+    when: (c) => c.comps.length >= 1 && c.day >= 4 && !c.flags.includes('birthday_done'),
+    situation: (c) => nm(c, 'highest_affection') + ' lẩm bẩm khi nghĩ bạn không để ý: "Hôm nay lẽ ra là sinh nhật tôi..." Rồi người đó cười gượng, đổi chủ đề ngay. Không ai trong tận thế còn nhớ ngày tháng, trừ những lúc như thế này.',
+    choices: [
+      { text: 'Tìm chút đồ ngon nhất, gói lại như món quà nhỏ', outcome: 'Bạn lục ba lô, gói món đồ ăn ngon nhất vào mảnh vải sạch. Người kia nhìn một lúc lâu, mắt đỏ lên: "Anh/chị nhớ thật à..." Đã lâu lắm không ai chúc, nay có bạn.', stats: { sanity: 4 }, team: { who: 'highest_affection', trust: 6, affection: 8, morale: 12 }, flags: ['birthday_done'], lose: [{ name: 'Thanh kẹo', quantity: 1 }] },
+      { text: 'Nhẹ nhàng hát khẽ một câu chúc mừng sinh nhật', outcome: 'Giọng bạn run và lạc tông, nhưng người kia bật cười rồi lại khóc. Họ ôm lấy tay bạn một cái thật nhanh rồi buông.', stats: { sanity: 3 }, team: { who: 'highest_affection', trust: 4, affection: 6, morale: 9 }, flags: ['birthday_done'] },
+      { text: 'Giả vờ không nghe thấy, để họ giữ nỗi buồn riêng', outcome: 'Bạn lờ đi. Có những người không muốn bị nhìn thấy khi yếu đuối. Nhưng cả buổi tối, bạn không thôi tự hỏi mình có làm đúng không.', stats: { sanity: -1 }, team: { who: 'highest_affection', morale: -3 }, flags: ['birthday_done'] },
+    ],
+  },
+  {
+    id: 'r_nightmare', zones: ['shelter'], primary: 'shelter', weight: 2,
+    when: (c) => c.comps.length >= 1 && c.night && c.comps.some((m) => m.morale < 60),
+    situation: (c) => 'Giữa đêm, ' + nm(c, 'lowest_morale') + ' giật mình choàng tỉnh, thở dốc, mồ hôi ướt tóc. Đôi mắt người đó mở to nhìn vào bóng tối như thể vẫn còn thấy thứ gì ở đó. Căn phòng lặng đi.',
+    choices: [
+      { text: 'Ngồi xuống bên cạnh, im lặng cho tới khi họ thở đều lại', outcome: 'Bạn không hỏi gì, chỉ ngồi đó. Một lúc lâu sau, người kia nói: "Tôi mơ thấy... " rồi không nói tiếp. Nhưng họ không còn run nữa.', stats: { stamina: -4, sanity: 2 }, team: { who: 'lowest_morale', trust: 5, morale: 10, affection: 2 } },
+      { text: 'Pha một ca nước ấm, đặt vào tay họ', outcome: 'Hơi ấm của chiếc ca làm họ dịu hẳn. Cử chỉ nhỏ ấy dường như nói được nhiều hơn mọi lời an ủi.', stats: { stamina: -2, sanity: 2 }, team: { who: 'lowest_morale', trust: 3, morale: 7 } },
+      { text: 'Nhắc họ ngủ tiếp, ngày mai còn nhiều việc', outcome: 'Họ gật đầu, nằm xuống quay lưng lại. Bạn nghe tiếng thở của họ rất lâu không đều. Bạn đã nói đúng, nhưng có lẽ không phải điều họ cần nghe.', stats: { sanity: -2 }, team: { who: 'lowest_morale', morale: -3, trust: -1 } },
+    ],
+  },
+  {
+    id: 'r_story_circle', zones: ['shelter'], primary: 'shelter', weight: 2,
+    when: (c) => c.comps.length >= 2 && !c.flags.includes('story_circle_done'),
+    situation: () => 'Cả nhóm ngồi quây quần quanh ngọn nến cuối ngày. Không ai nói gì, rồi có người hỏi nhỏ: "Mọi người nhớ điều gì nhất của ngày trước?" Câu hỏi treo lơ lửng trong ánh sáng lờ mờ.',
+    choices: [
+      { text: 'Kể về một ngày bình thường bạn nhớ nhất', outcome: 'Bạn kể về một buổi sáng chẳng có gì đặc biệt. Mọi người im lặng nghe, rồi lần lượt kể của họ. Có người cười, có người khóc, và không ai thấy cô độc nữa.', stats: { sanity: 6 }, team: { who: 'all', trust: 4, morale: 8, affection: 1 }, flags: ['story_circle_done'] },
+      { text: 'Gợi ý mỗi người nói một điều họ muốn làm đầu tiên khi mọi chuyện kết thúc', outcome: 'Có người muốn ăn một bát phở nóng, có người muốn gọi điện cho mẹ. Điều ước nhỏ bé, nhưng cả nhóm thấy mình có thứ gì đó để hướng tới.', stats: { sanity: 5 }, team: { who: 'all', trust: 3, morale: 9 }, flags: ['story_circle_done'] },
+      { text: 'Lắng nghe, không nói gì về mình', outcome: 'Bạn chỉ nghe. Họ kể, và bạn hiểu thêm về những người đang sống cùng. Nhưng có lẽ họ cũng muốn nghe về bạn.', stats: { sanity: 3 }, team: { who: 'all', trust: 2, morale: 4 }, flags: ['story_circle_done'] },
+    ],
+  },
+  {
+    id: 'r_mend_clothes', zones: ['shelter'], primary: 'shelter', weight: 1.5,
+    when: (c) => c.comps.length >= 1,
+    situation: (c) => nm(c, 'highest_trust') + ' ngồi dưới ánh đèn vá lại một chiếc áo rách toạc, kim chỉ lọng cọng. Thấy bạn nhìn, người đó giơ lên một mảnh vải: "Có áo nào của anh/chị rách không? Tiện tay vá luôn."',
+    choices: [
+      { text: 'Đưa áo của mình cho họ vá, ngồi nói chuyện bên cạnh', outcome: 'Mũi kim lên xuống đều đặn, hai người nói đủ thứ chuyện vụn vặt. Một chiếc áo được vá, và một cuộc nói chuyện dài hơn bình thường cũng vừa kết thúc.', stats: { sanity: 4 }, team: { who: 'highest_trust', trust: 4, affection: 3, morale: 5 } },
+      { text: 'Xin họ dạy bạn cách vá, tự tay làm', outcome: 'Mũi khâu của bạn xiêu vẹo, người kia cười không nhịn được. Họ cầm tay bạn chỉ lại, rồi cả hai cùng cười.', stats: { stamina: -1, sanity: 5 }, team: { who: 'highest_trust', trust: 3, affection: 4, morale: 6 } },
+      { text: 'Cảm ơn nhưng để dành sức, bảo họ cứ lo đồ của mình', outcome: 'Họ tiếp tục vá một mình. Bạn ngồi nhìn một lúc rồi đứng dậy làm việc khác.', stats: { sanity: 0 }, team: { who: 'highest_trust', morale: 1 } },
+    ],
+  },
+  {
+    id: 'r_makeup', zones: ['shelter'], primary: 'shelter', weight: 2,
+    when: (c) => c.comps.length >= 2 && selectCompanions(c.comps, 'lowest_trust')[0]?.trust !== undefined && (selectCompanions(c.comps, 'lowest_trust')[0]?.trust ?? 100) < 55,
+    situation: (c) => nm(c, 'lowest_trust') + ' đang đứng trước ' + nm(c, 'highest_trust') + ', ngập ngừng, như muốn xin lỗi vì chuyện hôm trước mà chưa biết bắt đầu từ đâu. Cả hai đều liếc về phía bạn như chờ một lời nào đó.',
+    choices: [
+      { text: 'Nhẹ nhàng đẩy họ lại gần nhau, nói rằng ai cũng có lúc nóng nảy', outcome: 'Bạn nói vài câu giản dị. Họ nhìn nhau, thở ra, rồi người kia gãi đầu: "Hôm trước... tôi xin lỗi." Chuyện cũ khép lại bằng một cái bắt tay ngượng ngùng.', stats: { stamina: -2, sanity: 4 }, team: [{ who: 'lowest_trust', trust: 8, morale: 7 }, { who: 'highest_trust', trust: 2, morale: 4 }] },
+      { text: 'Mời cả hai cùng ngồi ăn tối, không nhắc đến chuyện cũ', outcome: 'Bát cơm đặt giữa bàn làm mọi chuyện dễ nói hơn. Chuyện không được nhắc lại, nhưng hai người ngồi sát nhau hơn một chút.', stats: { sanity: 3 }, team: { who: 'all', trust: 3, morale: 4 } },
+      { text: 'Để họ tự giải quyết, bạn không xen vào', outcome: 'Bạn quay đi. Vài phút sau, bạn nghe tiếng họ nói chuyện nhỏ nhẹ. Hóa ra có những chuyện chỉ cần được để yên.', stats: { sanity: 1 }, team: { who: 'lowest_trust', trust: 3 } },
+    ],
+  },
+  {
+    id: 'r_first_laugh', zones: ['shelter'], primary: 'shelter', weight: 1.5,
+    when: (c) => c.comps.length >= 1 && c.comps.some((m) => m.morale >= 40 && m.morale <= 75),
+    situation: (c) => nm(c, 'highest_affection') + ' kể một câu chuyện đùa nhạt như nước ốc, vậy mà không hiểu sao cả {shelter} bỗng im bặt rồi bật cười ngặt nghẽo. Ai đó ôm bụng, ai đó phải che miệng vì sợ tiếng vọng ra ngoài.',
+    choices: [
+      { text: 'Cười hết mình cùng họ, mặc kệ tiếng vọng', outcome: 'Bạn cười đến chảy nước mắt. Đã bao lâu rồi mới được cười thế này? Tiếng cười nhỏ dần rồi tắt, để lại một khoảng im lặng rất ấm.', stats: { stamina: 2, sanity: 8 }, team: { who: 'all', morale: 8, trust: 2 } },
+      { text: 'Cười nhưng ra hiệu giữ khẽ, rồi kể thêm một chuyện đùa', outcome: 'Bạn thì thầm một chuyện còn nhạt hơn. Cả nhóm nín cười đến run vai. Đó là một đêm đáng nhớ.', stats: { sanity: 6 }, team: { who: 'all', morale: 7, trust: 3 } },
+      { text: 'Nhắc mọi người trật tự, tiếng cười có thể kéo lũ xác sống tới', outcome: 'Bạn nói đúng. Tiếng cười tắt ngấm, mọi người cúi đầu im lặng. Căn phòng trở lại lạnh lẽo như cũ.', stats: { sanity: -2 }, team: { who: 'all', morale: -3 } },
+    ],
+  },
   {
     id: 'r_ration_dispute', zones: ['shelter'], primary: 'shelter', weight: 4,
     when: (c) => c.comps.length >= 2 && c.hunger >= 45,
