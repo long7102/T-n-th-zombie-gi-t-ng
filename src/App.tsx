@@ -69,7 +69,7 @@ import { CompanionChat, ChatMsg } from './components/CompanionChat';
 import { computeTeamEffects } from './utils/teamEffects';
 import type { RoleId } from './data/companionChat';
 import { SceneIllustration } from './components/SceneIllustration';
-import { encodeMapAction, decodeMapAction, baseInfoOf, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
+import { encodeMapAction, decodeMapAction, baseInfoOf, settingForKind, WorldNode, generateOutposts, buildOutpostNodes, OutpostInstance, getNodeAny } from './data/worldMap';
 import { BaseHub } from './components/BaseHub';
 import { rq, addQty, fmtNamed, servingOf } from './data/units';
 import { NeedToast, NeedAlert } from './components/NeedToast';
@@ -160,6 +160,8 @@ export default function App() {
   const [companions, setCompanions] = useState<Companion[]>([]);
   const [day, setDay] = useState(1);
   const [turnCount, setTurnCount] = useState(1);
+  const [clock, setClock] = useState(2);
+  const [originSettingId, setOriginSettingId] = useState('apartment_survivors');
   const [location, setLocation] = useState('Khu Chung Cư Linh Đàm - Tầng 7');
   const [weather, setWeather] = useState<WeatherType>('dense_fog');
   const [weatherLabel, setWeatherLabel] = useState('Sương mù dày đặc buốt giá');
@@ -258,9 +260,9 @@ export default function App() {
     try {
       if (gamePhase === 'playing' && currentTurn && !isAiProcessing) {
         const snapshot = {
-          player, base, companions, day, turnCount, location, weather, weatherLabel, tomorrowForecast,
+          player, base, companions, day, turnCount, clock, location, weather, weatherLabel, tomorrowForecast,
           backgroundEffect, dangerLevel, history: history.slice(-60), currentTurn, pendingEvents, pendingRecruit, visitedNodes, mapVisits,
-          settingId, zone, awayTurns, worldFlags, outposts, vehicle, worldLog,
+          settingId, originSettingId, zone, awayTurns, worldFlags, outposts, vehicle, worldLog,
         };
         localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
         setHasSave(true);
@@ -283,6 +285,7 @@ export default function App() {
       setCompanions(s.companions || []);
       setDay(s.day);
       setTurnCount(s.turnCount);
+      setClock(typeof s.clock === 'number' ? s.clock : (s.turnCount || 1) * 2);
       setLocation(s.location);
       setWeather(s.weather);
       setWeatherLabel(s.weatherLabel);
@@ -296,6 +299,7 @@ export default function App() {
       setVisitedNodes(s.visitedNodes || []);
       setMapVisits(s.mapVisits || {});
       setSettingId(s.settingId || 'apartment_survivors');
+      setOriginSettingId(s.originSettingId || s.settingId || 'apartment_survivors');
       setZone(s.zone || 'shelter');
       setAwayTurns(s.awayTurns || 0);
       setWorldFlags(s.worldFlags || []);
@@ -427,6 +431,7 @@ export default function App() {
       setPendingEvents(data.pending_events || []);
       const startSettingId = data.settingId || scenarioId || 'apartment_survivors';
       setSettingId(startSettingId);
+      setOriginSettingId(startSettingId);
       setZone(data.zone || 'shelter');
       // Xuất phát ở chỗ đủ vững (chung cư, nhà riêng, siêu thị, trạm y tế) thì đó chính là căn cứ của bạn.
       const startSuit = SHELTER_SUITABILITY[startSettingId];
@@ -513,6 +518,7 @@ export default function App() {
           worldSummary: makeSummary().text,
           seenBefore: loadSeen(),
           turnCount,
+          clock,
           tomorrowForecast,
           pendingEvents,
           pendingRecruit,
@@ -796,7 +802,9 @@ export default function App() {
       setCompanions(updatedCompanions);
 
       const nextTurnNum = turnCount + 1;
-      const nextDay = Math.floor(nextTurnNum / 3) + 1;
+      const nextClock = typeof data.clock === 'number' ? data.clock : clock + 2;
+      const nextDay = Math.floor(nextClock / 6) + 1;
+      setClock(nextClock);
       setTurnCount(nextTurnNum);
       setDay(nextDay);
 
@@ -1271,10 +1279,17 @@ export default function App() {
     setTimeout(() => setRecentBaseBanner(null), 5000);
   };
 
-  // Chiếm một cứ điểm tìm được trên bản đồ làm căn cứ
+  // Chiếm một địa điểm làm căn cứ: kho mang theo, công trình và gia cố cũ mất, môi trường đổi theo chỗ mới, mất sức dọn đồ
   const handleClaimBase = (node: WorldNode) => {
     const info = baseInfoOf(node);
     if (!info) return;
+    if (worldFlags.includes('raid_warned')) {
+      setLootNotifications(['Không thể dọn đi lúc căn cứ sắp bị tấn công. Hãy đối phó trước đã.']);
+      return;
+    }
+    const moving = base.hasBase && base.baseNodeId !== node.id;
+    const backHome = node.id === 'home';
+    const newSetting = backHome ? originSettingId : settingForKind(node.kind, settingId);
     setShowMapModal(false);
     sound.playLoot();
     setBase((b) => ({
@@ -1285,14 +1300,25 @@ export default function App() {
       description: node.description,
       fortification: 20 + (info.bonus.walls || 0) * 15,
       base_type: info.baseKind,
-      baseNodeId: node.id,
+      baseNodeId: backHome ? undefined : node.id,
       fortified: [],
       modules: { ...info.bonus },
+      warehouse: b.hasBase ? b.warehouse : b.warehouse,
       fuel: b.fuel || 0,
+      facilities: { hasStove: (info.bonus.stove || 0) > 0, hasFoamBox: false, hasGeneratorAndFridge: false, hasTripwireAlarms: false },
     }));
+    setSettingId(newSetting);
+    setZone('shelter');
+    setAwayTurns(0);
+    setLocation(`${getSetting(newSetting).place} - ${node.name.split(' - ')[0]}`);
+    setWorldFlags((f) => [...f.filter((x) => !/^(raid_|prep_)/.test(x)), ...(newSetting === 'clinic_containment' ? ['clinic_breach'] : [])]);
+    if (moving) {
+      setPlayer((p) => ({ ...p, stats: { ...p.stats, stamina: Math.max(0, p.stats.stamina - 12), hunger: Math.min(100, p.stats.hunger + 6), thirst: Math.min(100, p.stats.thirst + 6) } }));
+      setLootNotifications([`Đã dọn tới ${node.name.split(' - ')[0]}: kho được mang theo, công trình cũ bỏ lại.`]);
+    }
     setRecentBaseBanner(info.baseName);
     setTimeout(() => setRecentBaseBanner(null), 6000);
-    pushLog('survival', `Chiếm ${node.name} làm căn cứ mới`);
+    pushLog('survival', moving ? `Chuyển căn cứ tới ${node.name}` : `Chiếm ${node.name} làm căn cứ`);
   };
 
   // Lắp xe từ phụ tùng; sửa xe; đổ xăng
@@ -1366,7 +1392,7 @@ export default function App() {
           player: { gender: player.gender, name: player.name, nameKnown: player.nameKnown !== false, sanity: player.stats.sanity },
           text,
           history: history.filter((m) => m.from !== 'system').slice(-8),
-          context: { day, zoneLabel: location, weather, hasBase: base.hasBase, safe: base.hasBase },
+          context: { day, zoneLabel: location, weather, hasBase: base.hasBase, safe: base.hasBase, needs: { hunger: player.stats.hunger, thirst: player.stats.thirst, stamina: player.stats.stamina, sanity: player.stats.sanity }, wounded: player.wound.hasOpenWound, recent: worldLog.slice(-3).map((w) => w.text) },
           askedName: !!comp.askedPlayerName,
         }),
       });
@@ -1717,7 +1743,6 @@ export default function App() {
         <TitleScreen
           onStartGame={() => setGamePhase('creation')}
           onContinueGame={hasSave ? handleContinueGame : undefined}
-          onOpenChronicle={() => setShowChronicle(true)}
           audioEnabled={audioEnabled}
           onToggleAudio={handleToggleAudio}
           hasApiKey={hasApiKey}

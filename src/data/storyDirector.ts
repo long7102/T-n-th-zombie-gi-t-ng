@@ -43,6 +43,7 @@ export interface ChosenResolution {
   flagsRemove?: string[];
   baseDelta?: { fortification: number; moduleLoss: string[]; stolen: { name: string; quantity: number }[] };
   vehicleDelta?: { condition: number; fuel: number };
+  timeCost?: number;            // số nhịp đồng hồ tốn (6 nhịp = 1 ngày; mặc định 2)
   deterministic: boolean;
 }
 
@@ -64,6 +65,7 @@ export interface TurnPlan {
   day: number;
   nextDay: number;
   nextTurn: number;
+  clock: number;
   newDay: boolean;
   weather: WeatherType;
   forecast: WeatherForecast;
@@ -682,6 +684,12 @@ function resolveMapTravel(mt: { nodeId: string; style: 'quick' | 'thorough'; hop
   else if (mt.visits > 0) lines.push('Vật tư ở đây đã vơi đi nhiều sau những lần ghé trước.');
   lines.push(`Cuối cùng bạn quay trở về ${setting.labels.shelter}, mệt lả.`);
 
+  // Thời gian đi loot: gần mất nửa ngày, xa mất cả ngày; càng lâu càng đói khát
+  const whole = node.region !== 'near';
+  r.timeCost = whole ? 6 : 3;
+  stats.hunger = (stats.hunger || 0) + (r.timeCost - 2) * 2;
+  stats.thirst = (stats.thirst || 0) + (r.timeCost - 2) * 2;
+  lines.push(whole ? 'Chuyến đi xa mất trọn một ngày: lúc về trời đã tối.' : 'Chuyến đi gần mất chừng nửa ngày.');
   r.gain = toItems(gained);
   r.stats = stats;
   r.outcome = lines.join(' ');
@@ -1103,8 +1111,14 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
   const setting = getSetting(req.settingId);
   const day = req.day || 1;
   const turn = req.turnCount || 1;
+  let zone: Zone = (req.zone as Zone) || 'shelter';
+  const resolution = resolveAction(req, rng, setting, zone, turn);
+  zone = resolution.zone ?? zone;
   const nextTurn = turn + 1;
-  const nextDay = Math.floor(nextTurn / 3) + 1;
+  // Đồng hồ: một ngày có 6 nhịp. Chuyến loot gần mất nửa ngày (3 nhịp), loot xa mất cả ngày (6 nhịp).
+  const clock = req.clock ?? turn * 2;
+  const nextClock = clock + (resolution.timeCost ?? 2);
+  const nextDay = Math.floor(nextClock / 6) + 1;
   const newDay = nextDay > day;
   const inv: any[] = req.player?.inventory || [];
   const comps: any[] = req.companions || [];
@@ -1123,10 +1137,6 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
   const hadSpecialEver = done.some((d) => !d.startsWith('r_'));
   if (!hadSpecialEver) sinceSpecial = done.length;
   const specialAllowed = nextTurn >= 4 && sinceSpecial >= 2;
-
-  let zone: Zone = (req.zone as Zone) || 'shelter';
-  const resolution = resolveAction(req, rng, setting, zone, turn);
-  zone = resolution.zone ?? zone;
 
   // Thời tiết & dự báo: chỉ đổi khi sang ngày mới, và bám dự báo hôm trước (65%).
   let weather: WeatherType = req.weather || 'clear';
@@ -1301,7 +1311,7 @@ export function planTurn(req: any, rng: Rng = Math.random): TurnPlan {
   const recentChoices = (req.history || []).slice(-3).flatMap((h: any) => h.choices || []);
 
   return {
-    resolution, next, day, nextDay, nextTurn, newDay, weather, forecast, pending,
+    resolution, next, day, nextDay, nextTurn, clock: nextClock, newDay, weather, forecast, pending,
     systemTrigger, radio, systemNote,
     waterCut: ctx.waterCut, blackout: ctx.blackout,
     needMap: newDay && !inv.some((i) => /băng|gạc|thuốc/i.test(i.name || '')),
@@ -1373,6 +1383,7 @@ export function renderOfflineTurn(req: any, plan: TurnPlan, rng: Rng = Math.rand
     situation: plan.next.situation,
     choices: plan.next.choices,
     scene_id: plan.next.id,
+    clock: plan.clock,
     zone: plan.zone,
     awayTurns: plan.awayTurns,
     customChoiceAllowed: true,

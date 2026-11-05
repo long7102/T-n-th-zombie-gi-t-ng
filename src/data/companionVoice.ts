@@ -13,7 +13,9 @@ export interface VoiceInput {
   affection: number;
   role?: string;
   history: { from: 'player' | 'npc'; text: string }[];
-  context?: { day?: number; weather?: string; hasBase?: boolean };
+  context?: { day?: number; weather?: string; hasBase?: boolean; needs?: { hunger: number; thirst: number; stamina: number; sanity: number }; wounded?: boolean; recent?: string[] };
+  age?: number;
+  gender?: string;
   fill: (t: string) => string;
   rng: Rng;
 }
@@ -111,6 +113,34 @@ export function humanize(i: VoiceInput): string {
     parts.push(' ' + i.fill('Từ khi có chỗ này, {me} dám ngủ hơn một chút.'));
   }
 
+  // 4b) Quan tâm tới tình trạng thật của người chơi (đói, khát, kiệt sức, bị thương, tinh thần xuống)
+  const nd = i.context?.needs;
+  if (i.tier !== 'low' && rng() < 0.4) {
+    const care: string[] = [];
+    if (nd && nd.hunger >= 70) care.push('{you} đói rồi đúng không? Nghe bụng {you} réo từ nãy.');
+    if (nd && nd.thirst >= 70) care.push('Môi {you} nứt hết rồi kìa. Uống chút nước đi.');
+    if (nd && nd.stamina < 30) care.push('Trông {you} kiệt sức thật. Nghỉ chút đi, đừng gồng.');
+    if (i.context?.wounded) care.push('Vết thương của {you} sao rồi? Đừng giấu {me}.');
+    if (nd && nd.sanity < 35) care.push('Giọng {you} lạ lắm. {you} có ổn không?');
+    if (care.length) { const c = pick(care); if (!used(c)) parts.push(' ' + i.fill(c)); }
+  }
+
+  // 4c) Nhắc lại chuyện vừa xảy ra trong nhóm
+  const recent = (i.context?.recent || []).filter(Boolean);
+  if (recent.length && i.tier !== 'low' && rng() < 0.25) {
+    const evt = recent[recent.length - 1].replace(/[.。]+$/, '').slice(0, 80);
+    const line = i.fill(`Chuyện "${evt}" vẫn làm {me} nghĩ mãi.`);
+    if (!used(line)) parts.push(' ' + line);
+  }
+
+  // 4d) Gọi lại điều người chơi từng nói trước đó trong cuộc trò chuyện
+  const earlier = i.history.filter((m) => m.from === 'player').slice(0, -1);
+  const callbackKeys: [RegExp, string][] = [[/mệt|kiệt/, 'Hồi nãy {you} bảo {you} mệt. Đỡ hơn chưa?'], [/sợ|hoảng/, 'Lúc nãy {you} nói {you} sợ. Giờ còn sợ không?'], [/nhớ|người thân|gia đình/, 'Chuyện {you} kể về người thân ấy, {me} vẫn nhớ.']];
+  if (earlier.length && rng() < 0.3) {
+    const hit = callbackKeys.find(([re]) => earlier.some((m) => re.test(m.text.toLowerCase())) && !re.test(lower));
+    if (hit && !used(hit[1])) parts.push(' ' + i.fill(hit[1]));
+  }
+
   // 5) Hỏi lại một câu đời thường (khi đã đủ tin), ưu tiên nét riêng của tính cách
   if (i.tier !== 'low' && rng() < 0.45) {
     const traitClosers = i.traits.flatMap((t) => TRAIT_CLOSERS[t] || []).filter((c) => (i.traits.includes('jealous') ? i.affection > 40 : true));
@@ -118,5 +148,15 @@ export function humanize(i: VoiceInput): string {
     if (pool.length) parts.push(' ' + i.fill(pick(pool)));
   }
 
-  return parts.join('').replace(/\s{2,}/g, ' ').replace(/(\*[^*]+\*)(?=\S)/g, '$1 ').trim();
+  let out = parts.join('').replace(/\s{2,}/g, ' ').replace(/(\*[^*]+\*)(?=\S)/g, '$1 ').trim();
+  // Giọng theo tuổi và giới: người trẻ hay thêm "nhé/nha", người lớn tuổi hay "đấy/chứ"
+  const young = (i.age ?? 30) < 30 && i.gender === 'female';
+  const elder = (i.age ?? 30) >= 45;
+  if ((young || elder) && rng() < 0.35) {
+    const particle = young ? pick(['nhé', 'nha', 'mà']) : pick(['đấy', 'chứ', 'ờ']);
+    out = out.replace(/([\p{L}])\.(\s|$)/u, (_m, ch: string, sp: string) => `${ch} ${particle}.${sp}`);
+  }
+  // Chưa tin thì nói ngập ngừng
+  if (i.tier === 'low' && rng() < 0.4) out = out.replace(/([\p{L}]),\s/u, '$1... ');
+  return out;
 }

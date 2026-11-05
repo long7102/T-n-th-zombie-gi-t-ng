@@ -3,7 +3,7 @@ import { NodeKind } from '../data/worldMap';
 
 // Tranh phác từng địa điểm trên bản đồ (kiểu This War of Mine x Last Day on Earth): bóng công trình đặc trưng,
 // ánh đèn vàng hiếm hoi, khói và sương chuyển động nhẹ, hạt giấy và nét than gạch chéo. Mỗi loại địa điểm một bố cục riêng.
-interface Props { kind: NodeKind; danger: number; known: boolean; seed: string }
+interface Props { kind: NodeKind; danger: number; known: boolean; seed: string; variant?: string }
 
 function rng(seedStr: string) {
   let h = 2166136261;
@@ -24,6 +24,106 @@ const LAMP = '#e6a23c';
 const Win: React.FC<{ x: number; y: number; w?: number; h?: number; lit?: boolean; i?: number }> = ({ x, y, w = 7, h = 9, lit, i = 0 }) => (
   <rect x={x} y={y} width={w} height={h} fill={lit ? LAMP : '#05070a'} opacity={lit ? 0.75 : 1} className={lit ? 'pi-lamp' : undefined} style={lit ? { animationDelay: `${(i % 5) * 0.7}s` } : undefined} />
 );
+
+
+// Mỗi cứ điểm ngẫu nhiên có một bản vẽ riêng, không dùng chung với địa điểm cùng loại.
+function variantBuilding(variant?: string): React.ReactNode | null {
+  switch (variant) {
+    case 'op_hospital_basement':
+      return (
+        <g>
+          <rect x="40" y="52" width="240" height="14" fill={MID} stroke={EDGE} />
+          <path d="M40 66H280V122H40Z" fill="#0a0c10" stroke={EDGE} />
+          <rect x="108" y="66" width="104" height="56" fill="#030406" />
+          {[0, 1, 2, 3, 4].map((i) => <path key={i} d={`M${108 + i * 8} ${66 + i * 8}H${212 - i * 8}`} stroke="#1b222a" strokeWidth="2" />)}
+          <rect x="140" y="38" width="40" height="12" fill={INK} stroke={EDGE} /><text x="160" y="47" textAnchor="middle" fontSize="8" fill="#6b7a86">B1</text>
+          <path d="M156 20h8v6h6v8h-6v6h-8v-6h-6v-8h6z" fill="#991b1b" opacity="0.7" transform="translate(0 -4) scale(0.9)" />
+          <g stroke="#2a323c" strokeWidth="2" fill="none"><path d="M60 80H108M212 92H262M60 100V80M262 92V70" /></g>
+          <line x1="160" y1="66" x2="160" y2="82" stroke="#3a4450" /><circle cx="160" cy="86" r="3" fill={LAMP} className="pi-lamp" />
+          <g transform="translate(236 40)" fill={INK} stroke={EDGE}><rect width="22" height="12" /><circle cx="5" cy="13" r="2.4" /><circle cx="17" cy="13" r="2.4" /></g>
+        </g>
+      );
+    case 'op_workshop':
+      return (
+        <g>
+          <path d="M50 120V70L90 52V70L130 52V70L170 52V70L210 52V70L250 52V120Z" fill={MID} stroke={EDGE} />
+          <rect x="108" y="82" width="72" height="38" fill="#05070a" stroke={EDGE} /><g stroke="#242b33">{[0, 1, 2, 3, 4].map((i) => <line key={i} x1="108" y1={86 + i * 7} x2="180" y2={86 + i * 7} />)}</g>
+          <rect x="108" y="82" width="72" height="14" fill="#2a2f36" />
+          <path d="M264 120V40H282L292 26" stroke="#2c3540" strokeWidth="3" fill="none" /><line x1="292" y1="26" x2="292" y2="46" stroke="#2c3540" /><path d="M288 46h8l-2 6h-4z" fill={INK} />
+          <g transform="translate(66 96)" fill={INK} stroke={EDGE}><rect width="12" height="22" rx="2" /><rect x="16" y="4" width="12" height="18" rx="2" /></g>
+          <g transform="translate(206 100)" fill="none" stroke="#3a4450"><circle r="9" /><circle cx="14" cy="6" r="6" /></g>
+          <g transform="translate(40 108)" fill={INK} stroke={EDGE}><circle cx="8" cy="8" r="8" /><circle cx="24" cy="10" r="7" /></g>
+        </g>
+      );
+    case 'op_farmhouse':
+      return (
+        <g>
+          <path d="M70 122V74L130 40L190 74V122Z" fill={MID} stroke={EDGE} />
+          <rect x="114" y="92" width="32" height="30" fill="#05070a" /><Win x={86} y={90} lit /><Win x={158} y={90} />
+          <g transform="translate(224 84)"><rect x="-14" y="22" width="28" height="16" fill={INK} stroke={EDGE} /><path d="M-18 22L0 6L18 22Z" fill={INK} stroke={EDGE} /><line x1="-10" y1="22" x2="-10" y2="8" stroke="#2c3540" /><line x1="10" y1="22" x2="10" y2="8" stroke="#2c3540" /><line x1="0" y1="14" x2="0" y2="26" stroke="#3a4450" /></g>
+          <g transform="translate(272 70)"><line x1="0" y1="52" x2="0" y2="4" stroke="#2c3540" strokeWidth="3" /><g className="pi-spin"><path d="M0 4L-4 -22M0 4L24 0M0 4L4 30M0 4L-26 8" stroke="#2c3540" strokeWidth="2.4" /></g></g>
+          <g stroke="#1c2a22" strokeWidth="2.2">{[0, 1, 2, 3, 4].map((i) => <line key={i} x1="18" y1={96 + i * 5} x2="64" y2={96 + i * 5} />)}</g>
+          <g stroke="#2a3038"><line x1="10" y1="122" x2="10" y2="100" /><line x1="30" y1="122" x2="30" y2="100" /></g>
+        </g>
+      );
+    case 'op_hill_station':
+      return (
+        <g>
+          <path d="M0 124Q80 70 160 78T320 66V124Z" fill="#0b0e12" stroke={EDGE} />
+          <g transform="translate(180 8)" stroke="#2c3540" strokeWidth="1.6" fill="none"><path d="M0 74L10 0L20 74M3 56H17M5 40H15M7 24H13" /><path d="M10 0V-8" /><ellipse cx="22" cy="22" rx="9" ry="5" transform="rotate(-25 22 22)" /></g>
+          <circle cx="190" cy="0" r="2.4" fill="#b91c1c" className="pi-lamp" />
+          <g transform="translate(104 78)"><rect width="34" height="20" fill={MID} stroke={EDGE} /><Win x={22} y={6} w={8} h={8} lit /></g>
+          <path d="M20 110Q60 98 100 106" stroke="#2c3540" fill="none" />
+        </g>
+      );
+    case 'op_school':
+      return (
+        <g>
+          <rect x="60" y="56" width="200" height="64" fill={MID} stroke={EDGE} />
+          <rect x="126" y="40" width="68" height="18" fill={INK} stroke={EDGE} />
+          <g transform="translate(206 20)"><rect x="0" y="12" width="34" height="22" rx="3" fill={INK} stroke={EDGE} /><path d="M4 34V44M30 34V44" stroke="#2c3540" strokeWidth="2" /><path d="M2 14H32" stroke="#3a4450" /></g>
+          <line x1="76" y1="14" x2="76" y2="60" stroke="#3a4450" /><path d="M76 14h18l-5 6 5 6H76z" fill="#2a1a1a" />
+          {[0, 1, 2, 3, 4, 5, 6].map((c) => [0, 1].map((r) => <Win key={`${c}${r}`} x={72 + c * 26} y={64 + r * 22} w={13} h={10} lit={(c + r * 3) % 9 === 4} i={c} />))}
+          <g fill={INK} stroke={EDGE}><circle cx="28" cy="104" r="4" /><path d="M24 108H32V120H24Z" /><circle cx="292" cy="106" r="4" /><path d="M288 110H296V120H288Z" /></g>
+        </g>
+      );
+    case 'op_old_church':
+      return (
+        <g>
+          <rect x="70" y="70" width="180" height="50" fill={MID} stroke={EDGE} />
+          <rect x="144" y="20" width="32" height="54" fill={MID} stroke={EDGE} />
+          <path d="M140 20L160 2L180 20Z" fill={INK} stroke={EDGE} /><path d="M160 -10v14M155 -4h10" stroke="#3a4450" strokeWidth="1.4" />
+          <g className="pi-sway"><path d="M154 40V30Q160 22 166 30V40Z" fill="#05070a" /><circle cx="160" cy="38" r="3" fill={LAMP} opacity="0.6" className="pi-lamp" /></g>
+          {[0, 1, 2, 3].map((i) => <path key={i} d={`M${84 + i * 38} 106V92Q${93 + i * 38} 84 ${102 + i * 38} 92V106Z`} fill="#0a0d12" stroke={EDGE} />)}
+          <path d="M148 120V104Q160 94 172 104V120Z" fill="#05070a" />
+          <g fill={INK}><circle cx="40" cy="108" r="14" /><rect x="38" y="112" width="4" height="10" /></g>
+        </g>
+      );
+    case 'op_cold_storage':
+      return (
+        <g>
+          <rect x="44" y="56" width="232" height="64" fill={MID} stroke={EDGE} />
+          <g stroke="#2c3540" fill="none"><path d="M70 56V36H98V56M120 56V28H150V56M176 56V40H200V56" /><circle cx="84" cy="46" r="5" /><circle cx="135" cy="40" r="7" /><circle cx="188" cy="48" r="4" /></g>
+          <path className="pi-smoke" d="M135 28C130 18 140 14 135 4" stroke="#c4cdd6" strokeWidth="5" fill="none" opacity="0.22" strokeLinecap="round" />
+          {[0, 1, 2, 3].map((i) => <rect key={i} x={72 + i * 54} y="84" width="40" height="36" fill="#1c232b" stroke={EDGE} />)}
+          <g transform="translate(250 96)" fill={INK} stroke={EDGE}><rect width="40" height="22" /><rect x="40" y="8" width="14" height="14" /><circle cx="10" cy="24" r="4" /><circle cx="44" cy="24" r="4" /></g>
+        </g>
+      );
+    case 'op_fuel_station':
+      return (
+        <g>
+          <rect x="52" y="40" width="216" height="9" fill={INK} stroke={EDGE} />
+          <rect x="74" y="49" width="7" height="62" fill={MID} /><rect x="239" y="49" width="7" height="62" fill={MID} />
+          {[0, 1, 2].map((i) => <g key={i} transform={`translate(${110 + i * 46} 74)`}><rect width="16" height="36" fill="#1c232b" stroke={EDGE} /><rect x="3" y="4" width="10" height="8" fill="#05070a" /></g>)}
+          <g transform="translate(258 70)" stroke="#2c3540"><line x1="0" y1="50" x2="0" y2="0" strokeWidth="2.4" /><rect x="-14" y="-14" width="28" height="16" fill="#1a1f25" /><text x="0" y="-2" textAnchor="middle" fontSize="8" fill="#6b7a86">24h</text></g>
+          <g transform="translate(40 90)" fill={INK} stroke={EDGE}><path d="M0 22L6 8H34L44 14V22Z" /><circle cx="10" cy="23" r="3.5" /><circle cx="32" cy="23" r="3.5" /></g>
+          <path d="M0 122V114H320V122Z" fill={INK} />
+        </g>
+      );
+    default:
+      return null;
+  }
+}
 
 function building(kind: NodeKind): React.ReactNode {
   switch (kind) {
@@ -207,7 +307,7 @@ function building(kind: NodeKind): React.ReactNode {
   }
 }
 
-export const PlaceIllustration: React.FC<Props> = ({ kind, danger, known, seed }) => {
+export const PlaceIllustration: React.FC<Props> = ({ kind, danger, known, seed, variant }) => {
   const art = useMemo(() => {
     const r = rng(seed + kind);
     const far: { x: number; w: number; h: number }[] = [];
@@ -225,9 +325,13 @@ export const PlaceIllustration: React.FC<Props> = ({ kind, danger, known, seed }
         @keyframes pi-flick{0%,100%{opacity:.8}15%{opacity:.35}30%{opacity:.9}55%{opacity:.5}75%{opacity:.85}}
         .pi-smoke{animation:pi-drift 12s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
         @keyframes pi-drift{0%,100%{transform:translateX(0) scaleX(1)}50%{transform:translateX(6px) scaleX(1.12)}}
+        .pi-spin{animation:pi-rot 14s linear infinite;transform-box:fill-box;transform-origin:50% 50%}
+        @keyframes pi-rot{to{transform:rotate(360deg)}}
+        .pi-sway{animation:pi-swing 5s ease-in-out infinite alternate;transform-box:fill-box;transform-origin:50% 0}
+        @keyframes pi-swing{from{transform:rotate(-3deg)}to{transform:rotate(3deg)}}
         .pi-fog{animation:pi-fogmove 30s ease-in-out infinite alternate}
         @keyframes pi-fogmove{from{transform:translateX(-40px)}to{transform:translateX(40px)}}
-        @media (prefers-reduced-motion: reduce){.pi-lamp,.pi-smoke,.pi-fog{animation:none}}
+        @media (prefers-reduced-motion: reduce){.pi-lamp,.pi-smoke,.pi-fog,.pi-spin,.pi-sway{animation:none}}
       `}</style>
       <defs>
         <linearGradient id={`${id}-sky`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#0d1014" /><stop offset="1" stopColor="#3a2d22" /></linearGradient>
@@ -254,7 +358,7 @@ export const PlaceIllustration: React.FC<Props> = ({ kind, danger, known, seed }
           ))}
         </g>
         <path d="M0 126V114H320V126Z" fill="#050608" />
-        {known ? <g transform="translate(0 6)">{building(kind)}</g> : <g opacity="0.45" transform="translate(0 6)"><rect x="110" y="50" width="100" height="70" fill="#0b0e12" /><text x="160" y="96" textAnchor="middle" fontSize="34" fill="#3a4450">?</text></g>}
+        {known ? <g transform="translate(0 6)">{variantBuilding(variant) ?? building(kind)}</g> : <g opacity="0.45" transform="translate(0 6)"><rect x="110" y="50" width="100" height="70" fill="#0b0e12" /><text x="160" y="96" textAnchor="middle" fontSize="34" fill="#3a4450">?</text></g>}
         <g className="pi-fog"><rect x="-60" width="440" height="130" fill={`url(#${id}-fog)`} /></g>
       </g>
 
