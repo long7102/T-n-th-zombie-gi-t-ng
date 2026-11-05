@@ -39,7 +39,7 @@ export const BaseCutaway: React.FC<Props> = ({ base, companions, loopStatus, veh
   const placed: Record<string, number> = {};
   const figures = [
     { key: 'me', room: 'f2_a', label: 'Bạn', tone: '#e7d9b8' },
-    ...companions.filter((c) => c.status !== 'deceased').map((c) => ({ key: c.id, room: spot[c.assignment || ''] || 'f2_a', label: c.name.replace(/\(.*\)/, '').trim().slice(0, 10), tone: '#c9b78f' })),
+    ...companions.filter((c) => c.status !== 'deceased').map((c) => ({ key: c.id, room: spot[(c.assignments && c.assignments[0]) || c.assignment || ''] || 'f2_a', label: c.name.replace(/\(.*\)/, '').trim().slice(0, 10), tone: '#c9b78f' })),
   ].map((f) => {
     const r = rooms.find((x) => x.id === f.room)!;
     const n = (placed[f.room] = (placed[f.room] || 0) + 1);

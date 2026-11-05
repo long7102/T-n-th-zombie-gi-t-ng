@@ -140,7 +140,8 @@ export interface Companion {
   realName?: string;     // Tên thật, chỉ lộ ra khi đã đủ tin tưởng/đủ lâu (name là biệt danh theo ngoại hình cho đến lúc đó)
   nameKnown?: boolean;   // false = chưa biết tên
   joinedTurn?: number;   // Lượt gia nhập (để tính lúc lộ tên)
-  assignment?: string;   // Vai trò được giao: guard | cook | scout | repair | medic | forage | rest
+  assignment?: string;   // Việc chính (phần tử đầu của assignments): guard | cook | scout | repair | medic | forage | rest
+  assignments?: string[]; // Nhiều việc cùng lúc, số lượng tối đa tùy sức khỏe, tinh thần và kỹ năng
   askedPlayerName?: boolean; // Đã hỏi tên người chơi chưa
   traits?: string[];     // Tính cách riêng: brave, coward, greedy, loyal, jealous, kind, hot_tempered
 }

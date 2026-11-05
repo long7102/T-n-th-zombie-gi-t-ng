@@ -289,7 +289,7 @@ export const BaseHub: React.FC<Props> = ({ base, backpack, settingId, shelterLab
                         {col.items.length === 0 && <div className="col-span-full py-6 text-center text-xs text-neutral-600">Trống</div>}
                         {col.items.map((it) => (
                           <button key={it.id} onClick={() => { sound.playClick(); col.action(it); }} title={`${it.name}: bấm để ${col.label.toLowerCase()}`} className="relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border border-neutral-700 bg-neutral-950/70 p-1 transition-colors hover:border-amber-500 hover:bg-neutral-800">
-                            <span className="text-2xl">{itemIcon(it)}</span>
+                            <span className="twm-ink text-2xl">{itemIcon(it)}</span>
                             <span className="mt-0.5 line-clamp-2 text-center text-[9px] leading-tight text-neutral-300">{it.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}</span>
                             <span className="absolute right-1 top-1 rounded bg-black/70 px-1 font-mono text-[10px] font-bold text-amber-400">{fmtQty(it)}</span>
                           </button>

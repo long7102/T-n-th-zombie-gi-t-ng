@@ -115,6 +115,22 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
           <div className="relative flex-1 bg-neutral-950 p-2 sm:p-3">
             <svg viewBox="0 0 100 70" className="h-auto w-full rounded-lg border border-neutral-800 bg-[#17130d]" role="img" aria-label="Sơ đồ bản đồ khu vực">
               <defs>
+                <filter id="map-wob" x="-2%" y="-2%" width="104%" height="104%" colorInterpolationFilters="sRGB">
+                  <feTurbulence type="fractalNoise" baseFrequency="0.06 0.09" numOctaves="2" seed="9" result="w" />
+                  <feDisplacementMap in="SourceGraphic" in2="w" scale="0.7" xChannelSelector="R" yChannelSelector="G" result="d" />
+                  <feColorMatrix in="d" type="saturate" values="0.5" />
+                </filter>
+                <filter id="map-grain" x="0" y="0" width="100%" height="100%">
+                  <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="3" />
+                  <feColorMatrix type="matrix" values="0 0 0 0 0.06  0 0 0 0 0.05  0 0 0 0 0.03  0 0 0 0.9 -0.3" />
+                </filter>
+                <filter id="map-stain" x="0" y="0" width="100%" height="100%">
+                  <feTurbulence type="fractalNoise" baseFrequency="0.02 0.03" numOctaves="3" seed="12" />
+                  <feColorMatrix type="matrix" values="0 0 0 0 0.03  0 0 0 0 0.02  0 0 0 0 0.01  0 0 0 1.2 -0.55" />
+                </filter>
+                <pattern id="map-hatch" width="2.2" height="2.2" patternUnits="userSpaceOnUse" patternTransform="rotate(38)">
+                  <line x1="0" y1="0" x2="0" y2="2.2" stroke="#000" strokeWidth="0.18" opacity="0.5" />
+                </pattern>
                 <pattern id="grid" width="5" height="5" patternUnits="userSpaceOnUse">
                   <path d="M 5 0 L 0 0 0 5" fill="none" stroke="#2d2518" strokeWidth="0.15" />
                 </pattern>
@@ -123,6 +139,8 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                   <stop offset="100%" stopColor="#000" stopOpacity="0.55" />
                 </radialGradient>
               </defs>
+              <rect width="100" height="70" fill="#1d1810" />
+              <g filter="url(#map-wob)">
               <rect width="100" height="70" fill="url(#grid)" />
 
               {/* Vùng khoảng cách quanh căn cứ */}
@@ -208,7 +226,12 @@ export const DynamicMapModal: React.FC<DynamicMapModalProps> = ({
                   ▲ BẠN Ở ĐÂY
                 </text>
               </g>
+              </g>
+              <rect width="100" height="70" fill="url(#map-hatch)" opacity="0.14" style={{ pointerEvents: 'none', mixBlendMode: 'multiply' }} />
+              <rect width="100" height="70" filter="url(#map-stain)" opacity="0.55" style={{ pointerEvents: 'none' }} />
+              <rect width="100" height="70" filter="url(#map-grain)" opacity="0.6" style={{ pointerEvents: 'none', mixBlendMode: 'multiply' }} />
               <rect width="100" height="70" fill="url(#fog)" style={{ pointerEvents: 'none' }} />
+              <rect x="0.4" y="0.4" width="99.2" height="69.2" fill="none" stroke="#000" strokeWidth="0.8" opacity="0.6" style={{ pointerEvents: 'none' }} />
             </svg>
 
             {/* Chú giải */}
