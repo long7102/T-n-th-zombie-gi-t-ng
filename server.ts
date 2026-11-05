@@ -144,7 +144,7 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ:
         soundCue: parsed.soundCue || 'zombie_growl',
       });
     } catch (err: any) {
-      console.error('Error generating custom start with Gemini:', err?.message);
+      console.warn('[AI Start] Chuyển sang kịch bản khởi đầu dã chiến:', err?.message);
     }
   }
 
@@ -305,7 +305,7 @@ app.post('/api/story/turn', async (req: Request, res: Response) => {
       ai_note: aiProvider,
     });
   } catch (err: any) {
-    console.error('Error in /api/story/turn with AI:', err?.message);
+    console.warn('[AI Turn] Chuyển sang kịch bản offline:', err?.message);
     // Hết token ở mọi nhà cung cấp (hoặc AI lỗi): chuyển sang kịch bản offline, game vẫn chơi tiếp được.
     return res.json({ ...base, ai_note: (err as any)?.exhausted ? 'exhausted' : 'offline' });
   }
@@ -393,7 +393,7 @@ Trả về JSON duy nhất:
       evaluation: parsed.evaluation || `Chế tạo thành công ${itemName}!`,
     });
   } catch (err: any) {
-    console.error('Error in /api/story/craft:', err?.message);
+    console.warn('[AI Craft] Chuyển sang chế tạo dã chiến:', err?.message);
     return res.json({
       success: true,
       resultItem: {

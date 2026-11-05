@@ -284,9 +284,68 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
     const splashes: { x: number; y: number; r: number; max: number; a: number }[] = [];
     const clouds = Array.from({ length: 6 }, () => ({ x: rnd() * width, y: height * (0.08 + rnd() * 0.3), w: 300 + rnd() * 360, v: 0.1 + rnd() * 0.2, a: 0.1 + rnd() * 0.16 }));
     const crows: { x: number; y: number; v: number; ph: number }[] = [];
+    interface LightningStrike {
+      start: number;
+      duration: number;
+      originX: number;
+      originY: number;
+      branches: { points: [number, number][]; width: number }[];
+      intensity: number;
+    }
+
+    const createLightningBolt = (startX: number, startY: number, targetY: number) => {
+      const branches: { points: [number, number][]; width: number }[] = [];
+      const mainPts: [number, number][] = [[startX, startY]];
+      let currX = startX;
+      let currY = startY;
+      const segments = 10 + Math.floor(rnd() * 6);
+      const stepY = (targetY - startY) / segments;
+
+      for (let s = 1; s <= segments; s++) {
+        currX += (rnd() - 0.5) * 32;
+        currY += stepY * (0.8 + rnd() * 0.4);
+        mainPts.push([currX, currY]);
+
+        if (s > 2 && s < segments - 2 && rnd() < 0.4) {
+          const forkPts: [number, number][] = [[currX, currY]];
+          let fx = currX;
+          let fy = currY;
+          const fLen = 3 + Math.floor(rnd() * 4);
+          const forkDir = rnd() < 0.5 ? -1 : 1;
+          for (let fs = 0; fs < fLen; fs++) {
+            fx += (rnd() * 18 + 6) * forkDir;
+            fy += stepY * 0.65 * (0.6 + rnd() * 0.5);
+            forkPts.push([fx, fy]);
+          }
+          branches.push({ points: forkPts, width: 0.9 });
+        }
+      }
+      branches.unshift({ points: mainPts, width: 1.8 });
+      return branches;
+    };
+
+    const getFlickerIntensity = (elapsed: number, duration: number): number => {
+      const p = elapsed / duration;
+      if (p < 0 || p > 1) return 0;
+      if (p < 0.12) {
+        return Math.sin((p / 0.12) * Math.PI) * 0.72;
+      } else if (p < 0.22) {
+        return 0.15 + Math.sin(((p - 0.12) / 0.1) * Math.PI) * 0.25;
+      } else if (p < 0.38) {
+        const subP = (p - 0.22) / 0.16;
+        return Math.sin(subP * Math.PI) * 1.0;
+      } else if (p < 0.55) {
+        const subP = (p - 0.38) / 0.17;
+        return 0.35 * (1 - subP) + Math.sin(subP * Math.PI * 2) * 0.08;
+      } else {
+        const subP = (p - 0.55) / 0.45;
+        return Math.max(0, 0.22 * Math.pow(1 - subP, 2));
+      }
+    };
+
     let nextCrow = Date.now() + 3000 + rnd() * 6000;
-    let thunder = 0;
-    let nextThunder = Date.now() + 5000 + rnd() * 8000;
+    let activeStrike: LightningStrike | null = null;
+    let nextLightning = Date.now() + 3000 + rnd() * 5000;
     let time = 0;
 
     const render = () => {
@@ -418,15 +477,85 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
           ctx.ellipse(s.x, s.y, s.r * 2, s.r * 0.7, 0, 0, Math.PI * 2);
           ctx.stroke();
         }
-        if (Date.now() > nextThunder) {
-          thunder = 0.2;
-          nextThunder = Date.now() + 7000 + rnd() * 10000;
-          window.setTimeout(() => sound.playThunder(), 500 + rnd() * 1200);
+        const now = Date.now();
+        if (now > nextLightning) {
+          const strikeX = width * (0.15 + rnd() * 0.7);
+          const strikeY = height * (0.02 + rnd() * 0.12);
+          const targetY = height * (0.35 + rnd() * 0.25);
+          activeStrike = {
+            start: now,
+            duration: 320 + rnd() * 160,
+            originX: strikeX,
+            originY: strikeY,
+            branches: createLightningBolt(strikeX, strikeY, targetY),
+            intensity: 0.16 + rnd() * 0.08,
+          };
+          nextLightning = now + 4500 + rnd() * 7000;
+          const thunderDelay = 350 + rnd() * 1100;
+          window.setTimeout(() => sound.playThunder(), thunderDelay);
         }
-        if (thunder > 0) {
-          ctx.fillStyle = `rgba(150,210,190,${thunder})`;
-          ctx.fillRect(0, 0, width, height);
-          thunder = Math.max(0, thunder - 0.012);
+
+        if (activeStrike) {
+          const elapsed = now - activeStrike.start;
+          if (elapsed >= activeStrike.duration) {
+            activeStrike = null;
+          } else {
+            const flicker = getFlickerIntensity(elapsed, activeStrike.duration);
+            const flashAlpha = activeStrike.intensity * flicker;
+
+            if (flashAlpha > 0.005) {
+              ctx.save();
+              // Subtle ambient flash wash across the atmosphere
+              ctx.fillStyle = `rgba(180, 220, 235, ${flashAlpha * 0.4})`;
+              ctx.fillRect(0, 0, width, height);
+
+              // Radial glow in the upper sky/cloud deck centered near strike origin
+              const glow = ctx.createRadialGradient(
+                activeStrike.originX,
+                activeStrike.originY,
+                15,
+                activeStrike.originX,
+                activeStrike.originY + height * 0.12,
+                Math.max(width, height) * 0.65
+              );
+              glow.addColorStop(0, `rgba(225, 245, 255, ${flashAlpha * 0.75})`);
+              glow.addColorStop(0.35, `rgba(160, 215, 235, ${flashAlpha * 0.35})`);
+              glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+              ctx.fillStyle = glow;
+              ctx.fillRect(0, 0, width, height);
+
+              // Procedural jagged lightning bolt visible during peak pulses
+              if (elapsed < activeStrike.duration * 0.48 && flicker > 0.22) {
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'miter';
+
+                for (const branch of activeStrike.branches) {
+                  if (branch.points.length < 2) continue;
+
+                  // Soft outer electric corona
+                  ctx.strokeStyle = `rgba(160, 225, 255, ${flashAlpha * 0.6})`;
+                  ctx.lineWidth = branch.width * 2.8;
+                  ctx.beginPath();
+                  branch.points.forEach(([px, py], idx) => {
+                    if (idx === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                  });
+                  ctx.stroke();
+
+                  // Crisp inner core
+                  ctx.strokeStyle = `rgba(245, 252, 255, ${Math.min(0.9, flashAlpha * 3.5)})`;
+                  ctx.lineWidth = branch.width;
+                  ctx.beginPath();
+                  branch.points.forEach(([px, py], idx) => {
+                    if (idx === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                  });
+                  ctx.stroke();
+                }
+              }
+              ctx.restore();
+            }
+          }
         }
       }
 
@@ -462,5 +591,224 @@ export const AtmosphereCanvas: React.FC<AtmosphereCanvasProps> = ({
     };
   }, [weather, backgroundEffect, dangerLevel, isEmergency, day, cityWaterCutoff, cityPowerBlackout]);
 
-  return <canvas ref={canvasRef} style={{ filter: 'sepia(0.28) saturate(0.78) contrast(1.06) brightness(0.92)' }} className="pointer-events-none fixed inset-0 z-0 h-full w-full" />;
+  const isDenseFog = pickKey(weather, backgroundEffect) === 'dense_fog';
+
+  return (
+    <div className="AtmosphereCanvas pointer-events-none fixed inset-0 z-0 h-full w-full overflow-hidden select-none">
+      <canvas
+        ref={canvasRef}
+        style={{ filter: 'sepia(0.28) saturate(0.78) contrast(1.06) brightness(0.92)' }}
+        className="AtmosphereCanvas pointer-events-none absolute inset-0 h-full w-full"
+      />
+      {isDenseFog && <DenseFogParticles />}
+    </div>
+  );
+};
+
+// ====================================================================
+// SUB-LAYER: HỆ THỐNG HẠT BỤI & MẢNH VỠ TRÔI LƠ LỬNG TRONG SƯƠNG MÙ DÀY (dense_fog)
+// Kết hợp SVG và CSS keyframes để tạo cảm giác không khí tù đọng, ngột ngạt và chiều sâu 3 lớp.
+// ====================================================================
+
+interface FogParticle {
+  id: number;
+  type: 'mote' | 'debris' | 'ash' | 'fiber';
+  depth: 'far' | 'mid' | 'near';
+  left: number;
+  top: number;
+  size: number;
+  duration: number;
+  delay: number;
+  driftX: number;
+  driftY: number;
+  rotStart: number;
+  rotEnd: number;
+  opacity: number;
+  blur: number;
+  color: string;
+  points?: string;
+  pathD?: string;
+  animType: 'A' | 'B';
+}
+
+const STATIC_FOG_PARTICLES: FogParticle[] = [
+  // 1. Lớp xa: Bụi phát sáng mờ ảo (far depth, chuyển động rất chậm, mờ nhạt tạo chiều sâu)
+  { id: 1, type: 'mote', depth: 'far', left: 7, top: 22, size: 4, duration: 25, delay: 0, driftX: 45, driftY: -30, rotStart: 0, rotEnd: 0, opacity: 0.32, blur: 1.6, color: '#bed499', animType: 'A' },
+  { id: 2, type: 'mote', depth: 'far', left: 23, top: 46, size: 5, duration: 28, delay: 4, driftX: -55, driftY: 22, rotStart: 0, rotEnd: 0, opacity: 0.28, blur: 1.8, color: '#8fa072', animType: 'B' },
+  { id: 3, type: 'mote', depth: 'far', left: 41, top: 14, size: 3, duration: 22, delay: 8, driftX: 38, driftY: -38, rotStart: 0, rotEnd: 0, opacity: 0.38, blur: 1.2, color: '#d2e3ad', animType: 'A' },
+  { id: 4, type: 'mote', depth: 'far', left: 63, top: 62, size: 6, duration: 27, delay: 2, driftX: -42, driftY: -26, rotStart: 0, rotEnd: 0, opacity: 0.25, blur: 2.1, color: '#a2b385', animType: 'B' },
+  { id: 5, type: 'mote', depth: 'far', left: 82, top: 33, size: 4, duration: 24, delay: 6, driftX: 48, driftY: 32, rotStart: 0, rotEnd: 0, opacity: 0.32, blur: 1.4, color: '#bed499', animType: 'A' },
+  { id: 6, type: 'mote', depth: 'far', left: 91, top: 78, size: 5, duration: 29, delay: 10, driftX: -58, driftY: -34, rotStart: 0, rotEnd: 0, opacity: 0.26, blur: 1.7, color: '#8fa072', animType: 'B' },
+  { id: 7, type: 'mote', depth: 'far', left: 14, top: 85, size: 4, duration: 23, delay: 3, driftX: 40, driftY: -18, rotStart: 0, rotEnd: 0, opacity: 0.3, blur: 1.5, color: '#aab88d', animType: 'A' },
+  { id: 8, type: 'mote', depth: 'far', left: 74, top: 12, size: 3, duration: 26, delay: 7, driftX: -34, driftY: 34, rotStart: 0, rotEnd: 0, opacity: 0.35, blur: 1.3, color: '#d2e3ad', animType: 'B' },
+
+  // 2. Lớp giữa: Hạt bụi độc, mảnh tro cháy và sợi tơ mục rã
+  { id: 9, type: 'mote', depth: 'mid', left: 18, top: 37, size: 5, duration: 18, delay: 1, driftX: 65, driftY: -45, rotStart: 0, rotEnd: 0, opacity: 0.45, blur: 0.6, color: '#c4d6a1', animType: 'A' },
+  { id: 10, type: 'mote', depth: 'mid', left: 35, top: 71, size: 6, duration: 21, delay: 5, driftX: -70, driftY: 26, rotStart: 0, rotEnd: 0, opacity: 0.38, blur: 0.8, color: '#9aab7a', animType: 'B' },
+  { id: 11, type: 'mote', depth: 'mid', left: 52, top: 27, size: 7, duration: 17, delay: 9, driftX: 55, driftY: -50, rotStart: 0, rotEnd: 0, opacity: 0.42, blur: 0.5, color: '#dbe8bd', animType: 'A' },
+  { id: 12, type: 'mote', depth: 'mid', left: 68, top: 49, size: 5, duration: 20, delay: 3, driftX: -48, driftY: 42, rotStart: 0, rotEnd: 0, opacity: 0.36, blur: 0.7, color: '#bed499', animType: 'B' },
+  { id: 13, type: 'mote', depth: 'mid', left: 86, top: 67, size: 6, duration: 19, delay: 7, driftX: 62, driftY: -32, rotStart: 0, rotEnd: 0, opacity: 0.4, blur: 0.6, color: '#a2b385', animType: 'A' },
+
+  // Mảnh vỡ đa giác & mảnh tro lơ lửng
+  { id: 14, type: 'debris', depth: 'mid', left: 11, top: 54, size: 10, duration: 21, delay: 2, driftX: 72, driftY: 34, rotStart: 15, rotEnd: 195, opacity: 0.4, blur: 0.4, color: '#2a3325', points: '0,3 7,0 10,7 5,10 1,7', animType: 'A' },
+  { id: 15, type: 'ash', depth: 'mid', left: 29, top: 17, size: 8, duration: 23, delay: 6, driftX: -64, driftY: -42, rotStart: 40, rotEnd: 240, opacity: 0.38, blur: 0.5, color: '#394233', points: '2,0 8,2 6,8 0,6', animType: 'B' },
+  { id: 16, type: 'debris', depth: 'mid', left: 47, top: 81, size: 11, duration: 19, delay: 10, driftX: 68, driftY: -46, rotStart: -20, rotEnd: 160, opacity: 0.35, blur: 0.4, color: '#242b1f', points: '0,2 9,0 11,8 4,11', animType: 'A' },
+  { id: 17, type: 'ash', depth: 'mid', left: 61, top: 31, size: 7, duration: 22, delay: 4, driftX: -78, driftY: 28, rotStart: 60, rotEnd: 290, opacity: 0.42, blur: 0.6, color: '#3f4a38', points: '3,0 7,3 4,7 0,4', animType: 'B' },
+  { id: 18, type: 'debris', depth: 'mid', left: 77, top: 44, size: 9, duration: 20, delay: 8, driftX: 58, driftY: 44, rotStart: 10, rotEnd: 190, opacity: 0.37, blur: 0.5, color: '#2b3326', points: '1,0 8,1 9,8 2,9', animType: 'A' },
+  { id: 19, type: 'ash', depth: 'mid', left: 93, top: 24, size: 8, duration: 24, delay: 1, driftX: -72, driftY: -36, rotStart: 5, rotEnd: 210, opacity: 0.36, blur: 0.5, color: '#353e2f', points: '2,0 7,2 8,7 1,6', animType: 'B' },
+
+  // Sợi vải mục rữa & tơ bụi hữu cơ
+  { id: 20, type: 'fiber', depth: 'mid', left: 22, top: 65, size: 14, duration: 22, delay: 3, driftX: 54, driftY: -54, rotStart: 25, rotEnd: 160, opacity: 0.38, blur: 0.3, color: '#4d5943', pathD: 'M 1 2 Q 8 8 13 1', animType: 'A' },
+  { id: 21, type: 'fiber', depth: 'mid', left: 57, top: 13, size: 16, duration: 25, delay: 7, driftX: -58, driftY: 38, rotStart: -15, rotEnd: 140, opacity: 0.34, blur: 0.4, color: '#44503b', pathD: 'M 2 13 Q 9 2 15 11', animType: 'B' },
+  { id: 22, type: 'fiber', depth: 'mid', left: 84, top: 85, size: 15, duration: 20, delay: 11, driftX: 68, driftY: -42, rotStart: 45, rotEnd: 225, opacity: 0.36, blur: 0.3, color: '#536148', pathD: 'M 1 1 Q 7 14 14 6', animType: 'A' },
+
+  // 3. Lớp gần: Mảnh vụn lớn cận cảnh và hạt bụi lớn trôi dạt sát mắt nhìn (bokeh mờ nhẹ)
+  { id: 23, type: 'debris', depth: 'near', left: 5, top: 39, size: 18, duration: 16, delay: 0, driftX: 92, driftY: -62, rotStart: 0, rotEnd: 180, opacity: 0.42, blur: 0.8, color: '#1a2117', points: '2,0 16,3 18,14 7,17 0,11', animType: 'A' },
+  { id: 24, type: 'mote', depth: 'near', left: 27, top: 79, size: 9, duration: 15, delay: 4, driftX: -88, driftY: 42, rotStart: 0, rotEnd: 0, opacity: 0.48, blur: 1.2, color: '#d7e7b8', animType: 'B' },
+  { id: 25, type: 'debris', depth: 'near', left: 44, top: 57, size: 22, duration: 18, delay: 8, driftX: 105, driftY: 48, rotStart: 30, rotEnd: 240, opacity: 0.38, blur: 1.0, color: '#222a1e', points: '4,0 20,2 22,18 8,21 1,12', animType: 'A' },
+  { id: 26, type: 'mote', depth: 'near', left: 64, top: 19, size: 11, duration: 14, delay: 2, driftX: -82, driftY: -58, rotStart: 0, rotEnd: 0, opacity: 0.45, blur: 1.4, color: '#c4d79e', animType: 'B' },
+  { id: 27, type: 'debris', depth: 'near', left: 87, top: 51, size: 19, duration: 17, delay: 6, driftX: 88, driftY: -52, rotStart: -45, rotEnd: 150, opacity: 0.4, blur: 0.9, color: '#1e261a', points: '1,3 17,0 19,15 5,18', animType: 'A' },
+  { id: 28, type: 'mote', depth: 'near', left: 94, top: 87, size: 10, duration: 16, delay: 9, driftX: -95, driftY: 38, rotStart: 0, rotEnd: 0, opacity: 0.46, blur: 1.3, color: '#e0efc4', animType: 'B' },
+];
+
+const DenseFogParticles: React.FC = () => {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-[1] overflow-hidden select-none"
+    >
+      <style>{`
+        @keyframes fogParticleA {
+          0% {
+            transform: translate3d(0, 0, 0) rotate(var(--rot-start, 0deg));
+            opacity: 0;
+          }
+          18% {
+            opacity: var(--target-opacity, 0.4);
+          }
+          50% {
+            transform: translate3d(var(--drift-x, 60px), var(--drift-y, -40px), 0) rotate(calc(var(--rot-start, 0deg) + 70deg));
+          }
+          82% {
+            opacity: var(--target-opacity, 0.4);
+          }
+          100% {
+            transform: translate3d(calc(var(--drift-x, 60px) * 1.8), calc(var(--drift-y, -40px) * 1.9), 0) rotate(var(--rot-end, 180deg));
+            opacity: 0;
+          }
+        }
+        @keyframes fogParticleB {
+          0% {
+            transform: translate3d(0, 0, 0) rotate(var(--rot-start, 0deg));
+            opacity: 0;
+          }
+          18% {
+            opacity: var(--target-opacity, 0.4);
+          }
+          52% {
+            transform: translate3d(calc(var(--drift-x, -50px) * 0.7), calc(var(--drift-y, 35px) * 0.8), 0) rotate(calc(var(--rot-start, 0deg) - 55deg));
+          }
+          80% {
+            opacity: var(--target-opacity, 0.4);
+          }
+          100% {
+            transform: translate3d(var(--drift-x, -50px), var(--drift-y, 35px), 0) rotate(var(--rot-end, -160deg));
+            opacity: 0;
+          }
+        }
+        @keyframes stagnantPulse {
+          0%, 100% {
+            filter: brightness(0.92) contrast(1);
+          }
+          50% {
+            filter: brightness(1.12) contrast(1.04);
+          }
+        }
+        @keyframes mistVeilDrift {
+          0% {
+            transform: translate3d(-6%, 0, 0) scaleY(1);
+          }
+          50% {
+            transform: translate3d(6%, -12px, 0) scaleY(1.06);
+          }
+          100% {
+            transform: translate3d(-6%, 0, 0) scaleY(1);
+          }
+        }
+      `}</style>
+
+      {/* Gradient SVG cho hạt bụi phát quang trong sương */}
+      <svg className="absolute h-0 w-0" aria-hidden="true">
+        <defs>
+          <radialGradient id="denseFogMoteGlow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#dcebc2" stopOpacity="0.95" />
+            <stop offset="45%" stopColor="#a3b882" stopOpacity="0.55" />
+            <stop offset="100%" stopColor="#556644" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+      </svg>
+
+      {/* Lớp sương mù bề mặt trôi chậm ở chân trời */}
+      <div className="absolute inset-x-0 bottom-0 h-48 opacity-35" style={{ animation: 'mistVeilDrift 28s ease-in-out infinite' }}>
+        <svg viewBox="0 0 1200 200" preserveAspectRatio="none" className="w-full h-full">
+          <path
+            d="M 0 100 Q 300 40 600 90 T 1200 70 L 1200 200 L 0 200 Z"
+            fill="rgba(154, 171, 122, 0.22)"
+            style={{ filter: 'blur(16px)' }}
+          />
+          <path
+            d="M 0 130 Q 350 80 700 120 T 1200 110 L 1200 200 L 0 200 Z"
+            fill="rgba(110, 125, 90, 0.28)"
+            style={{ filter: 'blur(10px)' }}
+          />
+        </svg>
+      </div>
+
+      {/* Hệ thống hạt bụi và mảnh vỡ lơ lửng */}
+      {STATIC_FOG_PARTICLES.map((p) => {
+        const animName = p.animType === 'A' ? 'fogParticleA' : 'fogParticleB';
+        return (
+          <div
+            key={p.id}
+            className="absolute will-change-transform"
+            style={{
+              left: `${p.left}%`,
+              top: `${p.top}%`,
+              width: `${p.size}px`,
+              height: `${p.size}px`,
+              filter: p.blur > 0 ? `blur(${p.blur}px)` : undefined,
+              animation: `${animName} ${p.duration}s cubic-bezier(0.42, 0, 0.58, 1) infinite, stagnantPulse ${p.duration * 0.7}s ease-in-out infinite`,
+              animationDelay: `${p.delay}s`,
+              ['--rot-start' as any]: `${p.rotStart}deg`,
+              ['--rot-end' as any]: `${p.rotEnd}deg`,
+              ['--drift-x' as any]: `${p.driftX}px`,
+              ['--drift-y' as any]: `${p.driftY}px`,
+              ['--target-opacity' as any]: p.opacity,
+            }}
+          >
+            {p.type === 'mote' ? (
+              <svg viewBox="0 0 10 10" className="w-full h-full overflow-visible">
+                <circle cx="5" cy="5" r="4.8" fill="url(#denseFogMoteGlow)" />
+                <circle cx="5" cy="5" r="1.8" fill="#eaf5d5" opacity="0.8" />
+              </svg>
+            ) : p.type === 'debris' || p.type === 'ash' ? (
+              <svg viewBox="0 0 24 24" className="w-full h-full overflow-visible">
+                <polygon points={p.points || '2,0 8,2 6,8 0,6'} fill={p.color} />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 18 18" className="w-full h-full overflow-visible">
+                <path
+                  d={p.pathD || 'M 1 2 Q 8 8 13 1'}
+                  stroke={p.color}
+                  strokeWidth="1.4"
+                  fill="none"
+                  strokeLinecap="round"
+                />
+              </svg>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 };

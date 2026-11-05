@@ -62,12 +62,19 @@ export function aiStatus() {
 function classify(err: any): { cooldownMs: number; reason: string } {
   const msg = String(err?.message || err || '');
   const status = Number(err?.status || err?.code || (msg.match(/\b(4\d\d|5\d\d)\b/) || [])[1] || 0);
-  if (status === 401 || status === 403 || /API key not valid|invalid x-api-key|Incorrect API key/i.test(msg)) return { cooldownMs: 24 * 3600e3, reason: 'khóa không hợp lệ' };
-  if (status === 429 || /quota|RESOURCE_EXHAUSTED|rate limit|insufficient_quota|credit/i.test(msg)) {
-    // Hết hạn mức ngày thì nghỉ lâu, chỉ chạm giới hạn tốc độ thì nghỉ ngắn
-    return /quota|insufficient|credit|billing/i.test(msg) ? { cooldownMs: 30 * 60e3, reason: 'hết hạn mức' } : { cooldownMs: 60e3, reason: 'giới hạn tốc độ' };
+  if (status === 401 || status === 403 || /API key not valid|invalid x-api-key|Incorrect API key|PERMISSION_DENIED/i.test(msg)) {
+    return { cooldownMs: 24 * 3600e3, reason: 'khóa không hợp lệ' };
   }
-  return { cooldownMs: 30e3, reason: 'lỗi tạm thời' };
+  if (status === 429 || /quota|RESOURCE_EXHAUSTED|rate limit|insufficient_quota|credit/i.test(msg)) {
+    return /insufficient|credit|billing/i.test(msg)
+      ? { cooldownMs: 15 * 60e3, reason: 'hết hạn mức' }
+      : { cooldownMs: 5e3, reason: 'giới hạn tốc độ' };
+  }
+  if (status === 503 || /high demand|temporar|overloaded|504|timeout/i.test(msg)) {
+    // 503 quá tải tức thời chỉ cần nghỉ 3s thay vì 30s để phục hồi ngay
+    return { cooldownMs: 3e3, reason: 'quá tải tạm thời (503)' };
+  }
+  return { cooldownMs: 4e3, reason: 'lỗi tạm thời' };
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -86,18 +93,41 @@ export function parseJsonLoose(text: string): any {
   throw new Error('AI không trả về JSON hợp lệ');
 }
 
+const GEMINI_MODELS = [
+  process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+  'gemini-2.5-flash',
+];
+
 async function callGemini(slot: Slot, prompt: string): Promise<string> {
   let client = geminiClients.get(slot.key);
   if (!client) {
     client = new GoogleGenAI({ apiKey: slot.key, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
     geminiClients.set(slot.key, client);
   }
-  const response = await client.models.generateContent({
-    model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-    contents: prompt,
-    config: { responseMimeType: 'application/json' },
-  });
-  return response.text || '';
+
+  let lastError: any;
+  for (const model of GEMINI_MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await client.models.generateContent({
+          model,
+          contents: prompt,
+          config: { responseMimeType: 'application/json' },
+        });
+        return response.text || '';
+      } catch (err: any) {
+        lastError = err;
+        const msg = String(err?.message || err);
+        const isTransient = /503|high demand|temporar|overloaded|429|RESOURCE_EXHAUSTED|504|timeout/i.test(msg);
+        if (isTransient && attempt === 0) {
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
+        }
+        break;
+      }
+    }
+  }
+  throw lastError;
 }
 
 async function callOpenAI(slot: Slot, prompt: string): Promise<string> {
@@ -134,7 +164,17 @@ async function callAnthropic(slot: Slot, prompt: string): Promise<string> {
 // Thử lần lượt các khóa còn dùng được; khóa thành công sẽ được xoay vòng xuống cuối để trải đều hạn mức.
 export async function generateJson(prompt: string): Promise<{ text: string; provider: string }> {
   const now = Date.now();
-  const candidates = slots.filter((s) => s.cooldownUntil <= now);
+  let candidates = slots.filter((s) => s.cooldownUntil <= now);
+
+  // Nếu tất cả slot đều đang cooldown tạm thời (<= 3s), chờ một nhịp ngắn thay vì từ chối
+  if (candidates.length === 0 && slots.length > 0) {
+    const minWait = Math.min(...slots.map((s) => Math.max(0, s.cooldownUntil - now)));
+    if (minWait > 0 && minWait <= 3500) {
+      await new Promise((r) => setTimeout(r, minWait + 100));
+      candidates = slots.filter((s) => s.cooldownUntil <= Date.now());
+    }
+  }
+
   // xoay vòng trong từng nhà cung cấp
   const ordered: Slot[] = [];
   const seenProv = new Set<string>();
@@ -161,5 +201,6 @@ export async function generateJson(prompt: string): Promise<{ text: string; prov
       console.warn(`[AI] ${slot.label} lỗi (${c.reason}), nghỉ ${Math.round(c.cooldownMs / 1000)}s: ${String(err?.message || err).slice(0, 120)}`);
     }
   }
-  throw Object.assign(new Error('Hết khóa/token khả dụng ở mọi nhà cung cấp AI'), { cause: lastErr, exhausted: true });
+  throw Object.assign(new Error('AI tạm thời bận, tự động chuyển sang chế độ kịch bản'), { cause: lastErr, exhausted: true });
 }
+
